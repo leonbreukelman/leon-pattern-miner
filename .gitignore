@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+
+# Local mining state / sensitive artifacts
+runtime/
+data/
+reports/
+*.db
+*.db-shm
+*.db-wal
+
+# Local model/runtime logs
+*.log
+.env

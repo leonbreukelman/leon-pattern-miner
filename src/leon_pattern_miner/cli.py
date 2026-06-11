@@ -8,7 +8,7 @@ from .db import connect, init_db
 from .extractors import run_deterministic_extractors
 from .ingest import ingest_hermes_state_db, ingest_path
 from .llm import health as llm_health
-from .llm_extractors import run_llm_extractors
+from .llm_extractors import DEFAULT_LLM_EXTRACTOR_VERSION, run_llm_extractors
 from .report import write_pilot_report
 from .runner import approve_pilot, enqueue_work, reset_stale_running_work, status_snapshot
 
@@ -70,10 +70,17 @@ def cmd_extract(args: argparse.Namespace) -> int:
     reset = reset_stale_running_work(conn, older_than_minutes=args.stale_minutes)
     queued = enqueue_work(conn, extractor_version="deterministic-v1")
     summary = run_deterministic_extractors(conn)
-    output = {"stale_reset": reset, "queued": queued, "records_created": summary.records_created}
+    output: dict[str, object] = {"stale_reset": reset, "queued": queued, "records_created": summary.records_created}
     if args.use_llm:
-        llm_summary = run_llm_extractors(conn, base_url=args.llm_url, max_sessions=args.llm_max_sessions, timeout=args.llm_timeout)
+        llm_summary = run_llm_extractors(
+            conn,
+            base_url=args.llm_url,
+            extractor_version=args.llm_extractor_version,
+            max_sessions=args.llm_max_sessions,
+            timeout=args.llm_timeout,
+        )
         output["llm"] = {
+            "extractor_version": args.llm_extractor_version,
             "sessions_processed": llm_summary.sessions_processed,
             "records_created": llm_summary.records_created,
             "errors": llm_summary.errors,
@@ -133,6 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--stale-minutes", type=int, default=30)
     extract.add_argument("--use-llm", action="store_true")
     extract.add_argument("--llm-url", default="http://127.0.0.1:8080")
+    extract.add_argument("--llm-extractor-version", default=DEFAULT_LLM_EXTRACTOR_VERSION)
     extract.add_argument("--llm-max-sessions", type=int, default=None)
     extract.add_argument("--llm-timeout", type=int, default=120)
     extract.set_defaults(func=cmd_extract)

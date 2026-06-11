@@ -16,4 +16,4 @@ Streams:
 2. **Agent behavior** — clarification triggers, failure/recovery arcs, wasted loops, verification habits.
 3. **Methodology** — emerging project-building methods across Leon projects.
 
-Local LLM target: OpenAI-compatible llama.cpp server on `127.0.0.1:8080`, preferably `Qwen/Qwen3-32B-GGUF:Q4_K_M` on the RTX 4090. Deterministic fallback runs are labeled and do not count as full-quality extraction.
+Local LLM target: OpenAI-compatible llama.cpp server on `127.0.0.1:8080`, preferably `unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M` on the RTX 4090 with `-c 8192`, `-np 1`, `--no-mmproj`, and thinking disabled. The default LLM extractor label is `local-qwen3.6-35b-a3b-ud-q4km-c8192-v1`; set `LLM_EXTRACTOR_VERSION` when intentionally comparing/replaying another model. Deterministic fallback runs are labeled and do not count as full-quality extraction.

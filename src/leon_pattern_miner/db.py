@@ -83,6 +83,7 @@ create table if not exists errors (
     session_id text,
     attempt integer,
     error_class text not null,
+    extractor_version text,
     payload_excerpt text,
     ts text default (datetime('now'))
 );
@@ -111,4 +112,21 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    error_columns = {row["name"] for row in conn.execute("pragma table_info(errors)")}
+    added_extractor_version = False
+    if "extractor_version" not in error_columns:
+        conn.execute("alter table errors add column extractor_version text")
+        added_extractor_version = True
+    # Legacy LLM errors predate version scoping. Backfill them once, when the
+    # migration adds the column, so newer models can rerun old failures without
+    # making every init_db() call scan the errors table.
+    if added_extractor_version:
+        conn.execute(
+            """
+            update errors
+            set extractor_version='local-qwen3-32b-q4km-v3'
+            where error_class='llm_extract_error'
+              and extractor_version is null
+            """
+        )
     conn.commit()

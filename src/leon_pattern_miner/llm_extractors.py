@@ -10,6 +10,8 @@ from .extractors import _actual_tool_failure, _agent_question_anchor, _insert_re
 from .llm import chat_json, health
 from .sensitivity import mask_sensitive
 
+DEFAULT_LLM_EXTRACTOR_VERSION = "local-qwen3.6-35b-a3b-ud-q4km-c8192-v1"
+
 ALLOWED_PATTERN_TYPES = {
     "steering": {
         "recurring_question",
@@ -195,7 +197,7 @@ def run_llm_extractors(
     conn: sqlite3.Connection,
     *,
     base_url: str = "http://127.0.0.1:8080",
-    extractor_version: str = "local-qwen3-32b-q4km-v3",
+    extractor_version: str = DEFAULT_LLM_EXTRACTOR_VERSION,
     max_sessions: int | None = None,
     timeout: int = 120,
 ) -> LLMExtractSummary:
@@ -218,7 +220,7 @@ def run_llm_extractors(
         if completed:
             continue
         existing = conn.execute(
-            "select count(*) from records where session_id=? and extractor_version=?",
+            "select count(*) from records where session_id=? and extractor='local_llm' and extractor_version=?",
             (sid, extractor_version),
         ).fetchone()[0]
         if existing:
@@ -226,8 +228,13 @@ def run_llm_extractors(
             conn.commit()
             continue
         prior_failures = conn.execute(
-            "select count(*) from errors where session_id=? and error_class='llm_extract_error'",
-            (sid,),
+            """
+            select count(*) from errors
+            where session_id=?
+              and error_class='llm_extract_error'
+              and extractor_version=?
+            """,
+            (sid, extractor_version),
         ).fetchone()[0]
         if prior_failures >= 2:
             continue
@@ -261,8 +268,11 @@ def run_llm_extractors(
         except Exception as exc:
             errors += 1
             conn.execute(
-                "insert into errors(session_id, error_class, payload_excerpt) values (?, 'llm_extract_error', ?)",
-                (sid, str(exc)[:1000]),
+                """
+                insert into errors(session_id, error_class, extractor_version, payload_excerpt)
+                values (?, 'llm_extract_error', ?, ?)
+                """,
+                (sid, extractor_version, str(exc)[:1000]),
             )
             conn.commit()
     return LLMExtractSummary(records_created=created, sessions_processed=processed, errors=errors)

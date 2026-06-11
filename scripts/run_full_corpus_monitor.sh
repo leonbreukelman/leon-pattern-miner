@@ -27,6 +27,7 @@ where s.status in ('normalized','extracted','verified')
   and not exists (
     select 1 from records r
     where r.session_id=s.session_id
+      and r.extractor='local_llm'
       and r.extractor_version='local-qwen3-32b-q4km-v3'
   )
   and (

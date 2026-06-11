@@ -8,7 +8,7 @@ from leon_pattern_miner.ingest import ingest_hermes_state_db, ingest_path
 from leon_pattern_miner.llm import LLMHealth, chat_json
 from leon_pattern_miner.llm_extractors import _coerce_confidence, _prompt_for_turns, run_llm_extractors, validate_llm_record_payloads
 from leon_pattern_miner.report import write_pilot_report
-from leon_pattern_miner.runner import approve_pilot, enqueue_work, reset_stale_running_work, work_status_counts
+from leon_pattern_miner.runner import approve_pilot, enqueue_work, reset_stale_running_work, status_snapshot, work_status_counts
 from leon_pattern_miner.sensitivity import mask_sensitive, sensitivity_for_text
 
 
@@ -121,6 +121,21 @@ def test_work_queue_resets_stale_running_items(tmp_path):
 
     assert reset == 3
     assert work_status_counts(conn)["pending"] == 3
+
+
+def test_deterministic_work_items_are_marked_completed_after_extraction(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    ingest_path(conn, FIXTURE)
+    enqueue_work(conn, extractor_version="deterministic-v1")
+
+    assert work_status_counts(conn)["pending"] == 3
+
+    run_deterministic_extractors(conn)
+
+    counts = work_status_counts(conn)
+    assert counts.get("pending", 0) == 0
+    assert counts["completed"] == 3
 
 
 def test_full_corpus_gate_requires_pilot_approval(tmp_path):
@@ -237,10 +252,42 @@ def test_chat_json_uses_bounded_generation_budget(monkeypatch):
     monkeypatch.setattr(llm_module.urllib.request, "urlopen", fake_urlopen)
 
     assert chat_json("extract this", timeout=321)["json"] == {"records": []}
-    assert captured["payload"]["max_tokens"] <= 512
+    assert 1024 <= captured["payload"]["max_tokens"] <= 1536
     assert captured["payload"]["chat_template_kwargs"] == {"enable_thinking": False}
     assert captured["payload"]["messages"][1]["content"].startswith("/no_think\n")
     assert captured["timeout"] == 321
+
+
+def test_chat_json_retries_once_after_malformed_json(monkeypatch):
+    payloads = [
+        {"choices": [{"message": {"content": '{"records": ['}}]},
+        {"choices": [{"message": {"content": '{"records": []}'}}]},
+    ]
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(self.payload).encode()
+
+    def fake_urlopen(req, timeout):
+        calls.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse(payloads[len(calls) - 1])
+
+    import leon_pattern_miner.llm as llm_module
+
+    monkeypatch.setattr(llm_module.urllib.request, "urlopen", fake_urlopen)
+
+    assert chat_json("extract this") == {"json": {"records": []}, "masked_hits": 0}
+    assert len(calls) == 2
 
 
 def test_llm_record_validation_rejects_non_verbatim_evidence(tmp_path):
@@ -670,6 +717,34 @@ def test_pilot_report_does_not_duplicate_generic_example_section(tmp_path):
     assert "## Example records" not in text
 
 
+def test_report_includes_llm_progress_counters(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    for sid in ("processed-zero", "processed-records", "excluded", "remaining"):
+        _seed_session(conn, session_id=sid, turns=[("agent", "Should I verify this?", None)])
+        conn.execute("update sessions set status='extracted' where session_id=?", (sid,))
+    conn.execute(
+        "insert into llm_session_runs(session_id, extractor_version, records_created) values ('processed-zero', 'local-qwen3-32b-q4km-v3', 0)"
+    )
+    conn.execute(
+        "insert into llm_session_runs(session_id, extractor_version, records_created) values ('processed-records', 'local-qwen3-32b-q4km-v3', 2)"
+    )
+    conn.executemany(
+        "insert into errors(session_id, error_class, payload_excerpt) values ('excluded', 'llm_extract_error', ?)",
+        [("bad json",), ("bad json again",)],
+    )
+    conn.commit()
+
+    report = write_pilot_report(conn, tmp_path / "pilot.md", run_id="progress")
+    text = report.read_text(encoding="utf-8")
+
+    assert "## LLM progress" in text
+    assert "- local-qwen3-32b-q4km-v3 processed sessions: 2" in text
+    assert "- local-qwen3-32b-q4km-v3 zero-record processed sessions: 1" in text
+    assert "- local-qwen3-32b-q4km-v3 retry-cap excluded sessions: 1" in text
+    assert "- local-qwen3-32b-q4km-v3 remaining under retry cap: 1" in text
+
+
 def test_template_like_methodology_quotes_are_deduped_and_status_updates_demoted(tmp_path):
     conn = connect(tmp_path / "miner.db")
     init_db(conn)
@@ -710,3 +785,53 @@ def test_brief_truncation_is_word_bounded_with_ellipsis():
 
     assert brief.endswith("…")
     assert brief == "ask fable to review the…"
+
+
+def test_status_snapshot_counts_llm_progress(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    for sid in ("processed-zero", "excluded", "remaining"):
+        _seed_session(conn, session_id=sid, turns=[("agent", "Should I verify this?", None)])
+        conn.execute("update sessions set status='extracted' where session_id=?", (sid,))
+    conn.execute(
+        "insert into llm_session_runs(session_id, extractor_version, records_created) values ('processed-zero', 'local-qwen3-32b-q4km-v3', 0)"
+    )
+    conn.executemany(
+        "insert into errors(session_id, error_class, payload_excerpt) values ('excluded', 'llm_extract_error', ?)",
+        [("bad json",), ("bad json again",)],
+    )
+    conn.execute(
+        """
+        insert into records(
+            record_id, session_id, stream, pattern_type, summary, evidence_json,
+            actor, confidence, sensitivity, extractor, extractor_version, recommended_sink
+        ) values (
+            'non-llm-same-version', 'remaining', 'methodology', 'plan_spike_build_verify',
+            'non-LLM record using a colliding version label', '[]', 'agent', 0.5, 'internal',
+            'deterministic', 'local-qwen3-32b-q4km-v3', 'report_only'
+        )
+        """
+    )
+    conn.commit()
+
+    snap = status_snapshot(conn)
+    llm_progress = snap["llm_progress"]
+    assert isinstance(llm_progress, dict)
+
+    assert llm_progress["local-qwen3-32b-q4km-v3"] == {
+        "processed_sessions": 1,
+        "zero_record_processed_sessions": 1,
+        "records_created": 0,
+        "remaining_under_retry_cap": 1,
+        "retry_cap_excluded_sessions": 1,
+    }
+
+
+def test_monitor_scripts_are_resilient_and_amortized():
+    once = Path("scripts/monitor_once.sh").read_text(encoding="utf-8")
+    loop = Path("scripts/run_full_corpus_monitor.sh").read_text(encoding="utf-8")
+
+    assert "extract_status=" in once
+    assert "report_status=" in once
+    assert "monitor extract failed" in once
+    assert 'LLM_BATCH="${LLM_BATCH:-25}"' in loop

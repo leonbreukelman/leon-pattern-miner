@@ -13,8 +13,20 @@ mkdir -p runtime reports
 
 echo "[$(date -Is)] monitor start db=$DB run_id=$RUN_ID llm_max_sessions=$LLM_MAX_SESSIONS llm_timeout=$LLM_TIMEOUT"
 uv run miner --db "$DB" status --check-llm --llm-url "$LLM_URL" || true
-uv run miner --db "$DB" retry-failed >/dev/null
+uv run miner --db "$DB" retry-failed >/dev/null || true
+set +e
 uv run miner --db "$DB" extract --full-corpus --use-llm --llm-url "$LLM_URL" --llm-max-sessions "$LLM_MAX_SESSIONS" --llm-timeout "$LLM_TIMEOUT"
+extract_status=$?
+set -e
+if [[ "$extract_status" != "0" ]]; then
+  echo "[$(date -Is)] monitor extract failed status=$extract_status; continuing to report/status"
+fi
+set +e
 uv run miner --db "$DB" report --run-id "$RUN_ID" --output "$REPORT"
+report_status=$?
+set -e
+if [[ "$report_status" != "0" ]]; then
+  echo "[$(date -Is)] monitor report failed status=$report_status; continuing to status"
+fi
 uv run miner --db "$DB" status --check-llm --llm-url "$LLM_URL" || true
-echo "[$(date -Is)] monitor done report=$REPORT"
+echo "[$(date -Is)] monitor done report=$REPORT extract_status=$extract_status report_status=$report_status"

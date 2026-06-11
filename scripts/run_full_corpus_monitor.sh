@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DB="${MINER_DB:-runtime/miner.db}"
-LLM_BATCH="${LLM_BATCH:-3}"
+LLM_BATCH="${LLM_BATCH:-25}"
 LLM_TIMEOUT="${LLM_TIMEOUT:-240}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-10}"
 LOG="${MONITOR_LOG:-runtime/full_corpus_monitor.log}"

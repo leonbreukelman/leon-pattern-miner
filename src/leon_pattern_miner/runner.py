@@ -87,9 +87,10 @@ def llm_progress_counts(conn: sqlite3.Connection) -> dict[str, dict[str, int]]:
                 select count(*) from errors e
                 where e.session_id=s.session_id
                   and e.error_class='llm_extract_error'
+                  and e.extractor_version=?
               ) < 2
             """,
-            (version, version),
+            (version, version, version),
         ).fetchone()[0]
         excluded = conn.execute(
             """
@@ -112,9 +113,10 @@ def llm_progress_counts(conn: sqlite3.Connection) -> dict[str, dict[str, int]]:
                 select count(*) from errors e
                 where e.session_id=s.session_id
                   and e.error_class='llm_extract_error'
+                  and e.extractor_version=?
               ) >= 2
             """,
-            (version, version),
+            (version, version, version),
         ).fetchone()[0]
         progress[version] = {
             "processed_sessions": int(row["processed_sessions"]),

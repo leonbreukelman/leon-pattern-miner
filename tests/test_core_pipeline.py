@@ -6,7 +6,13 @@ from leon_pattern_miner.db import connect, init_db
 from leon_pattern_miner.extractors import run_deterministic_extractors
 from leon_pattern_miner.ingest import ingest_hermes_state_db, ingest_path
 from leon_pattern_miner.llm import LLMHealth, chat_json
-from leon_pattern_miner.llm_extractors import _coerce_confidence, _prompt_for_turns, run_llm_extractors, validate_llm_record_payloads
+from leon_pattern_miner.llm_extractors import (
+    DEFAULT_LLM_EXTRACTOR_VERSION,
+    _coerce_confidence,
+    _prompt_for_turns,
+    run_llm_extractors,
+    validate_llm_record_payloads,
+)
 from leon_pattern_miner.report import write_pilot_report
 from leon_pattern_miner.runner import approve_pilot, enqueue_work, reset_stale_running_work, status_snapshot, work_status_counts
 from leon_pattern_miner.sensitivity import mask_sensitive, sensitivity_for_text
@@ -76,6 +82,7 @@ def test_extract_cli_accepts_llm_timeout_for_slow_partial_offload():
     args = build_parser().parse_args(["extract", "--use-llm", "--llm-max-sessions", "1", "--llm-timeout", "600"])
 
     assert args.llm_timeout == 600
+    assert args.llm_extractor_version == DEFAULT_LLM_EXTRACTOR_VERSION
 
 
 def test_sensitive_values_are_masked_before_llm_payloads():
@@ -458,8 +465,11 @@ def test_llm_extractor_skips_sessions_after_repeated_errors(monkeypatch, tmp_pat
     _seed_session(conn, session_id="a", turns=[("agent", "Should I run the stale failed session?", None)])
     _seed_session(conn, session_id="b", turns=[("agent", "Should I run the healthy session?", None)])
     conn.executemany(
-        "insert into errors(session_id, error_class, payload_excerpt) values (?, 'llm_extract_error', 'prior failure')",
-        [("a",), ("a",), ("a",)],
+        """
+        insert into errors(session_id, error_class, extractor_version, payload_excerpt)
+        values (?, 'llm_extract_error', ?, 'prior failure')
+        """,
+        [("a", DEFAULT_LLM_EXTRACTOR_VERSION), ("a", DEFAULT_LLM_EXTRACTOR_VERSION), ("a", DEFAULT_LLM_EXTRACTOR_VERSION)],
     )
     conn.commit()
     healthy_turn = conn.execute("select * from turns where session_id='b'").fetchone()
@@ -494,6 +504,52 @@ def test_llm_extractor_skips_sessions_after_repeated_errors(monkeypatch, tmp_pat
     assert summary.errors == 0
     assert conn.execute("select count(*) from records where session_id='b'").fetchone()[0] == 1
     assert conn.execute("select count(*) from records where session_id='a'").fetchone()[0] == 0
+
+
+def test_llm_retry_cap_is_scoped_to_extractor_version(monkeypatch, tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    _seed_session(conn, session_id="a", turns=[("agent", "Should I retry with a better model?", None)])
+    turn = conn.execute("select * from turns where session_id='a'").fetchone()
+    old_version = "local-qwen3-32b-q4km-v3"
+    new_version = DEFAULT_LLM_EXTRACTOR_VERSION
+    conn.executemany(
+        """
+        insert into errors(session_id, error_class, extractor_version, payload_excerpt)
+        values ('a', 'llm_extract_error', ?, 'old model failure')
+        """,
+        [(old_version,), (old_version,)],
+    )
+    conn.commit()
+
+    def fake_chat_json(prompt, *, base_url, timeout):
+        return {
+            "json": {
+                "records": [
+                    {
+                        "stream": "behavior",
+                        "pattern_type": "clarification_trigger",
+                        "summary": "new model retry succeeds",
+                        "actor": "agent",
+                        "scope": "session",
+                        "confidence": 0.7,
+                        "recommended_sink": "report_only",
+                        "evidence": [{"turn_id": turn["turn_id"], "quote": turn["text"]}],
+                    }
+                ]
+            },
+            "masked_hits": 0,
+        }
+
+    import leon_pattern_miner.llm_extractors as llm_extractors_module
+
+    monkeypatch.setattr(llm_extractors_module, "health", lambda base_url: LLMHealth(True, "ok"))
+    monkeypatch.setattr(llm_extractors_module, "chat_json", fake_chat_json)
+
+    summary = run_llm_extractors(conn, extractor_version=new_version, max_sessions=1)
+
+    assert summary.sessions_processed == 1
+    assert conn.execute("select count(*) from records where extractor_version=?", (new_version,)).fetchone()[0] == 1
 
 
 def test_llm_extractor_marks_zero_record_sessions_processed_so_monitor_advances(monkeypatch, tmp_path):
@@ -730,7 +786,10 @@ def test_report_includes_llm_progress_counters(tmp_path):
         "insert into llm_session_runs(session_id, extractor_version, records_created) values ('processed-records', 'local-qwen3-32b-q4km-v3', 2)"
     )
     conn.executemany(
-        "insert into errors(session_id, error_class, payload_excerpt) values ('excluded', 'llm_extract_error', ?)",
+        """
+        insert into errors(session_id, error_class, extractor_version, payload_excerpt)
+        values ('excluded', 'llm_extract_error', 'local-qwen3-32b-q4km-v3', ?)
+        """,
         [("bad json",), ("bad json again",)],
     )
     conn.commit()
@@ -797,7 +856,10 @@ def test_status_snapshot_counts_llm_progress(tmp_path):
         "insert into llm_session_runs(session_id, extractor_version, records_created) values ('processed-zero', 'local-qwen3-32b-q4km-v3', 0)"
     )
     conn.executemany(
-        "insert into errors(session_id, error_class, payload_excerpt) values ('excluded', 'llm_extract_error', ?)",
+        """
+        insert into errors(session_id, error_class, extractor_version, payload_excerpt)
+        values ('excluded', 'llm_extract_error', 'local-qwen3-32b-q4km-v3', ?)
+        """,
         [("bad json",), ("bad json again",)],
     )
     conn.execute(
@@ -834,5 +896,8 @@ def test_monitor_scripts_are_resilient_and_amortized():
     assert "extract_status=" in once
     assert "report_status=" in once
     assert "monitor extract failed" in once
+    assert "--llm-extractor-version" in once
+    assert 'LLM_EXTRACTOR_VERSION="${LLM_EXTRACTOR_VERSION:-local-qwen3.6-35b-a3b-ud-q4km-c8192-v1}"' in loop
     assert "r.extractor='local_llm'" in loop
+    assert "e.extractor_version=?" in loop
     assert 'LLM_BATCH="${LLM_BATCH:-25}"' in loop

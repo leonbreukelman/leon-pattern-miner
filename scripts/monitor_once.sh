@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 
 DB="${MINER_DB:-runtime/miner.db}"
 LLM_URL="${LLM_URL:-http://127.0.0.1:8080}"
+LLM_EXTRACTOR_VERSION="${LLM_EXTRACTOR_VERSION:-local-qwen3.6-35b-a3b-ud-q4km-c8192-v1}"
 LLM_MAX_SESSIONS="${LLM_MAX_SESSIONS:-1}"
 LLM_TIMEOUT="${LLM_TIMEOUT:-600}"
 RUN_ID="${RUN_ID:-full-corpus-latest}"
@@ -11,11 +12,11 @@ REPORT="${REPORT:-reports/${RUN_ID}.md}"
 
 mkdir -p runtime reports
 
-echo "[$(date -Is)] monitor start db=$DB run_id=$RUN_ID llm_max_sessions=$LLM_MAX_SESSIONS llm_timeout=$LLM_TIMEOUT"
+echo "[$(date -Is)] monitor start db=$DB run_id=$RUN_ID llm_extractor_version=$LLM_EXTRACTOR_VERSION llm_max_sessions=$LLM_MAX_SESSIONS llm_timeout=$LLM_TIMEOUT"
 uv run miner --db "$DB" status --check-llm --llm-url "$LLM_URL" || true
 uv run miner --db "$DB" retry-failed >/dev/null || true
 set +e
-uv run miner --db "$DB" extract --full-corpus --use-llm --llm-url "$LLM_URL" --llm-max-sessions "$LLM_MAX_SESSIONS" --llm-timeout "$LLM_TIMEOUT"
+uv run miner --db "$DB" extract --full-corpus --use-llm --llm-url "$LLM_URL" --llm-extractor-version "$LLM_EXTRACTOR_VERSION" --llm-max-sessions "$LLM_MAX_SESSIONS" --llm-timeout "$LLM_TIMEOUT"
 extract_status=$?
 set -e
 if [[ "$extract_status" != "0" ]]; then

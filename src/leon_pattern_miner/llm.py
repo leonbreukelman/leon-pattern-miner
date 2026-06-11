@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
 from .sensitivity import mask_sensitive
+
+DEFAULT_LLM_MODEL_ID = "unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M"
 
 
 @dataclass(frozen=True)
@@ -43,7 +46,7 @@ def chat_json(prompt: str, *, base_url: str = "http://127.0.0.1:8080", timeout: 
     for attempt in range(2):
         retry_suffix = "" if attempt == 0 else '\n\nPrevious response was invalid JSON. Return a compact valid JSON object only; use {"records": []} if no records qualify.'
         payload = {
-            "model": "local-qwen3-32b-q4km",
+            "model": os.environ.get("LLM_MODEL_ID", DEFAULT_LLM_MODEL_ID),
             "messages": [
                 {"role": "system", "content": "Return only valid JSON. Do not include markdown, <think> blocks, or reasoning."},
                 {"role": "user", "content": "/no_think\n" + masked + retry_suffix},

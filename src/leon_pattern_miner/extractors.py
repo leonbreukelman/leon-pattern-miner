@@ -294,5 +294,14 @@ def run_deterministic_extractors(conn: sqlite3.Connection) -> ExtractSummary:
                     confidence=0.68,
                 )
         conn.execute("update sessions set status='extracted' where session_id=?", (sid,))
+    conn.execute(
+        """
+        update work_items
+        set status='completed', finished_at=coalesce(finished_at, datetime('now'))
+        where extractor_version='deterministic-v1'
+          and status in ('pending', 'running')
+          and session_id in (select session_id from sessions where status in ('extracted', 'verified'))
+        """
+    )
     conn.commit()
     return ExtractSummary(records_created=created)

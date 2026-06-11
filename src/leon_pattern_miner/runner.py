@@ -41,6 +41,91 @@ def work_status_counts(conn: sqlite3.Connection) -> dict[str, int]:
     return {row["status"]: row["c"] for row in rows}
 
 
+def llm_progress_counts(conn: sqlite3.Connection) -> dict[str, dict[str, int]]:
+    versions = {
+        row["extractor_version"]
+        for row in conn.execute(
+            """
+            select extractor_version from llm_session_runs
+            union
+            select extractor_version from records where extractor='local_llm'
+            """
+        )
+    }
+    if not versions:
+        return {}
+    progress: dict[str, dict[str, int]] = {}
+    for version in sorted(versions):
+        row = conn.execute(
+            """
+            select count(*) as processed_sessions,
+                   coalesce(sum(case when records_created=0 then 1 else 0 end), 0) as zero_record_processed_sessions,
+                   coalesce(sum(records_created), 0) as records_created
+            from llm_session_runs
+            where extractor_version=? and status='processed'
+            """,
+            (version,),
+        ).fetchone()
+        remaining = conn.execute(
+            """
+            select count(*)
+            from sessions s
+            where s.status in ('normalized','extracted','verified')
+              and not exists (
+                select 1 from llm_session_runs l
+                where l.session_id=s.session_id
+                  and l.extractor_version=?
+                  and l.status='processed'
+              )
+              and not exists (
+                select 1 from records r
+                where r.session_id=s.session_id
+                  and r.extractor='local_llm'
+                  and r.extractor_version=?
+              )
+              and (
+                select count(*) from errors e
+                where e.session_id=s.session_id
+                  and e.error_class='llm_extract_error'
+              ) < 2
+            """,
+            (version, version),
+        ).fetchone()[0]
+        excluded = conn.execute(
+            """
+            select count(*)
+            from sessions s
+            where s.status in ('normalized','extracted','verified')
+              and not exists (
+                select 1 from llm_session_runs l
+                where l.session_id=s.session_id
+                  and l.extractor_version=?
+                  and l.status='processed'
+              )
+              and not exists (
+                select 1 from records r
+                where r.session_id=s.session_id
+                  and r.extractor='local_llm'
+                  and r.extractor_version=?
+              )
+              and (
+                select count(*) from errors e
+                where e.session_id=s.session_id
+                  and e.error_class='llm_extract_error'
+              ) >= 2
+            """,
+            (version, version),
+        ).fetchone()[0]
+        progress[version] = {
+            "processed_sessions": int(row["processed_sessions"]),
+            "zero_record_processed_sessions": int(row["zero_record_processed_sessions"]),
+            "records_created": int(row["records_created"]),
+            "remaining_under_retry_cap": int(remaining),
+            "retry_cap_excluded_sessions": int(excluded),
+        }
+    return progress
+
+
 def approve_pilot(conn: sqlite3.Connection, *, run_id: str, reviewer: str, notes: str) -> None:
     conn.execute(
         """
@@ -72,5 +157,6 @@ def status_snapshot(conn: sqlite3.Connection) -> dict[str, object]:
         "records": scalar("select count(*) from records"),
         "errors": scalar("select count(*) from errors"),
         "work_items": work_status_counts(conn),
+        "llm_progress": llm_progress_counts(conn),
         "pilot_approved": pilot_is_approved(conn),
     }

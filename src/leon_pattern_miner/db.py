@@ -59,6 +59,15 @@ create table if not exists records (
     created_at text default (datetime('now'))
 );
 
+create table if not exists llm_session_runs (
+    session_id text not null references sessions(session_id),
+    extractor_version text not null,
+    status text not null default 'processed',
+    records_created integer not null default 0,
+    processed_at text default (datetime('now')),
+    primary key(session_id, extractor_version)
+);
+
 create table if not exists runs (
     run_id text primary key,
     started_at text default (datetime('now')),

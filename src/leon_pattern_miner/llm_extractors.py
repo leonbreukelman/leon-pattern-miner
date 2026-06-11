@@ -120,6 +120,20 @@ def validate_llm_record_payloads(turns: list[sqlite3.Row], payload: dict[str, An
     return valid
 
 
+def _mark_session_processed(conn: sqlite3.Connection, *, session_id: str, extractor_version: str, records_created: int) -> None:
+    conn.execute(
+        """
+        insert into llm_session_runs(session_id, extractor_version, status, records_created, processed_at)
+        values (?, ?, 'processed', ?, datetime('now'))
+        on conflict(session_id, extractor_version) do update set
+            status=excluded.status,
+            records_created=excluded.records_created,
+            processed_at=excluded.processed_at
+        """,
+        (session_id, extractor_version, records_created),
+    )
+
+
 def _coerce_confidence(value: Any) -> float:
     if isinstance(value, (int, float)):
         return max(0.0, min(1.0, float(value)))
@@ -197,11 +211,19 @@ def run_llm_extractors(
         if max_sessions is not None and attempted >= max_sessions:
             break
         sid = sess["session_id"]
+        completed = conn.execute(
+            "select 1 from llm_session_runs where session_id=? and extractor_version=? and status='processed'",
+            (sid, extractor_version),
+        ).fetchone()
+        if completed:
+            continue
         existing = conn.execute(
             "select count(*) from records where session_id=? and extractor_version=?",
             (sid, extractor_version),
         ).fetchone()[0]
         if existing:
+            _mark_session_processed(conn, session_id=sid, extractor_version=extractor_version, records_created=existing)
+            conn.commit()
             continue
         prior_failures = conn.execute(
             "select count(*) from errors where session_id=? and error_class='llm_extract_error'",
@@ -214,9 +236,10 @@ def run_llm_extractors(
         try:
             payload = chat_json(_prompt_for_turns(turns), base_url=base_url, timeout=timeout)["json"]
             valid = validate_llm_record_payloads(turns, payload)
+            session_created = 0
             for rec in valid:
                 evidence_rows = [next(row for row in turns if row["turn_id"] == ev["turn_id"]) for ev in rec["evidence"]]
-                created += _insert_record(
+                inserted = _insert_record(
                     conn,
                     session_id=sid,
                     stream=rec["stream"],
@@ -230,6 +253,9 @@ def run_llm_extractors(
                     confidence=_coerce_confidence(rec.get("confidence")),
                     recommended_sink=str(rec.get("recommended_sink") or "report_only")[:80],
                 )
+                session_created += inserted
+                created += inserted
+            _mark_session_processed(conn, session_id=sid, extractor_version=extractor_version, records_created=session_created)
             conn.commit()
             processed += 1
         except Exception as exc:

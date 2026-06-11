@@ -11,11 +11,19 @@ mkdir -p runtime reports
 
 remaining() {
   uv run python - "$DB" <<'PY'
-import sqlite3, sys
-conn = sqlite3.connect(sys.argv[1])
+import sys
+from leon_pattern_miner.db import connect, init_db
+conn = connect(sys.argv[1])
+init_db(conn)
 print(conn.execute("""
 select count(*) from sessions s
 where s.status in ('normalized','extracted','verified')
+  and not exists (
+    select 1 from llm_session_runs l
+    where l.session_id=s.session_id
+      and l.extractor_version='local-qwen3-32b-q4km-v3'
+      and l.status='processed'
+  )
   and not exists (
     select 1 from records r
     where r.session_id=s.session_id

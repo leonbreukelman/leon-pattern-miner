@@ -449,6 +449,52 @@ def test_llm_extractor_skips_sessions_after_repeated_errors(monkeypatch, tmp_pat
     assert conn.execute("select count(*) from records where session_id='a'").fetchone()[0] == 0
 
 
+def test_llm_extractor_marks_zero_record_sessions_processed_so_monitor_advances(monkeypatch, tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    _seed_session(conn, session_id="a", turns=[("agent", "I have no durable pattern here.", None)])
+    _seed_session(conn, session_id="b", turns=[("agent", "Should I ask before deployment?", None)])
+    b_turn = conn.execute("select * from turns where session_id='b'").fetchone()
+    calls = []
+
+    def fake_chat_json(prompt, *, base_url, timeout):
+        if "turn_id=a:0" in prompt:
+            calls.append("a")
+            return {"json": {"records": []}, "masked_hits": 0}
+        calls.append("b")
+        return {
+            "json": {
+                "records": [
+                    {
+                        "stream": "behavior",
+                        "pattern_type": "clarification_trigger",
+                        "summary": "agent asks before deploy",
+                        "actor": "agent",
+                        "scope": "session",
+                        "confidence": 0.7,
+                        "recommended_sink": "report_only",
+                        "evidence": [{"turn_id": b_turn["turn_id"], "quote": b_turn["text"]}],
+                    }
+                ]
+            },
+            "masked_hits": 0,
+        }
+
+    import leon_pattern_miner.llm_extractors as llm_extractors_module
+
+    monkeypatch.setattr(llm_extractors_module, "health", lambda base_url: LLMHealth(True, "ok"))
+    monkeypatch.setattr(llm_extractors_module, "chat_json", fake_chat_json)
+
+    first = run_llm_extractors(conn, max_sessions=1)
+    second = run_llm_extractors(conn, max_sessions=1)
+
+    assert first.sessions_processed == 1
+    assert first.records_created == 0
+    assert second.sessions_processed == 1
+    assert second.records_created == 1
+    assert calls == ["a", "b"]
+
+
 def test_career_and_employer_content_is_personal():
     assert sensitivity_for_text("Smurfit Westrock employment history and resume positioning") == "personal"
 

@@ -72,7 +72,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
     summary = run_deterministic_extractors(conn)
     output = {"stale_reset": reset, "queued": queued, "records_created": summary.records_created}
     if args.use_llm:
-        llm_summary = run_llm_extractors(conn, base_url=args.llm_url, max_sessions=args.llm_max_sessions)
+        llm_summary = run_llm_extractors(conn, base_url=args.llm_url, max_sessions=args.llm_max_sessions, timeout=args.llm_timeout)
         output["llm"] = {
             "sessions_processed": llm_summary.sessions_processed,
             "records_created": llm_summary.records_created,
@@ -134,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--use-llm", action="store_true")
     extract.add_argument("--llm-url", default="http://127.0.0.1:8080")
     extract.add_argument("--llm-max-sessions", type=int, default=None)
+    extract.add_argument("--llm-timeout", type=int, default=120)
     extract.set_defaults(func=cmd_extract)
 
     status = sub.add_parser("status")

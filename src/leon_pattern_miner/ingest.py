@@ -50,6 +50,29 @@ def _text_from_message(msg: dict[str, Any]) -> str:
     return str(content)
 
 
+def _should_skip_message(role: str | None, tool_name: str | None, text: str) -> bool:
+    lower = (text or "").lower()
+    if not lower.strip() and not tool_name:
+        return True
+    if role == "system":
+        return True
+    if "[context compaction" in lower or "context compaction — reference only" in lower:
+        return True
+    if lower.startswith("[important:") or "[important: background process" in lower or "[important: the user has invoked" in lower:
+        return True
+    if lower.startswith("[your active task list was preserved across context compression]"):
+        return True
+    if "<available_skills>" in lower or "conversation-archive-mining/skill.md" in lower:
+        return True
+    if tool_name in {"skill_view", "skills_list"}:
+        return True
+    if role == "tool" and tool_name not in {"terminal", "process", "browser_console"}:
+        return True
+    if "tool definitions" in lower and "namespace" in lower:
+        return True
+    return False
+
+
 def _load_messages(path: Path) -> tuple[str, list[dict[str, Any]]]:
     suffix = path.suffix.lower()
     if suffix == ".jsonl":
@@ -94,12 +117,16 @@ def _store_messages(
         (sid, source_path, fmt, len(messages), content_hash),
     )
     cursor = 0
+    inserted = 0
     for idx, msg in enumerate(messages):
         if not isinstance(msg, dict):
             msg = {"role": "unknown", "content": str(msg)}
         text = _text_from_message(msg)
-        actor = _actor_from_role(msg.get("role") or msg.get("actor") or msg.get("type"))
+        role = msg.get("role") or msg.get("actor") or msg.get("type")
         tool_name = msg.get("tool_name") or msg.get("name") if isinstance(msg, dict) else None
+        if _should_skip_message(str(role or "").lower(), tool_name, text):
+            continue
+        actor = _actor_from_role(role)
         start = cursor
         end = start + len(text)
         turn_id = f"{sid}:{idx}"
@@ -108,8 +135,10 @@ def _store_messages(
             (turn_id, sid, idx, actor, msg.get("timestamp") or msg.get("ts"), text, tool_name, start, end),
         )
         cursor = end + 1
+        inserted += 1
+    conn.execute("update sessions set turn_count=? where session_id=?", (inserted, sid))
     conn.commit()
-    return IngestResult(sessions_ingested=1, turns_ingested=len(messages))
+    return IngestResult(sessions_ingested=1, turns_ingested=inserted)
 
 
 def ingest_path(conn: sqlite3.Connection, path: str | Path, *, session_id: str | None = None) -> IngestResult:
@@ -140,7 +169,7 @@ def ingest_hermes_state_db(
     state_db_path: str | Path,
     *,
     limit: int = 20,
-    exclude_substring: str = "leon-pattern-miner",
+    exclude_substring: str = "leon-pattern-miner,leon pattern miner,pattern miner,pattern-miner,conversation miner,conversation mining,conversation-mining,pilot-00,local conversation mining",
 ) -> IngestResult:
     """Ingest recent Hermes sessions directly from ~/.hermes/state.db.
 
@@ -164,11 +193,12 @@ def ingest_hermes_state_db(
         """
     ).fetchall()
     ingested = turns = errors = 0
+    exclude_terms = [term.strip().lower() for term in exclude_substring.split(",") if term.strip()]
     for sess in rows:
         haystack = "\n".join(str(sess[k] or "") for k in sess.keys()).lower()
-        if exclude_substring.lower() in haystack:
+        if any(term in haystack for term in exclude_terms):
             continue
-        if ingested >= limit:
+        if limit > 0 and ingested >= limit:
             break
         messages = []
         for msg in source.execute(
@@ -176,19 +206,22 @@ def ingest_hermes_state_db(
             (sess["id"],),
         ):
             content = msg["content"] or ""
-            if msg["role"] == "system":
-                continue
-            if not content.strip() and not msg["tool_name"]:
+            role = msg["role"]
+            tool_name = msg["tool_name"]
+            if _should_skip_message(role, tool_name, content):
                 continue
             messages.append(
                 {
-                    "role": msg["role"],
+                    "role": role,
                     "content": content,
-                    "tool_name": msg["tool_name"],
+                    "tool_name": tool_name,
                     "timestamp": str(msg["timestamp"]),
                 }
             )
         if not messages:
+            continue
+        message_haystack = "\n".join(str(m.get("content") or "") for m in messages).lower()
+        if any(term in message_haystack for term in exclude_terms):
             continue
         content_hash = hashlib.sha256(
             json.dumps(messages, sort_keys=True, ensure_ascii=False).encode("utf-8")

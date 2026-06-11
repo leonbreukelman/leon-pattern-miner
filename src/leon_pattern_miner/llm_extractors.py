@@ -6,11 +6,43 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
-from .extractors import _insert_record
+from .extractors import _actual_tool_failure, _agent_question_anchor, _insert_record, _methodology_sink, ALLOWED_SINKS
 from .llm import chat_json, health
 from .sensitivity import mask_sensitive
 
-ALLOWED_STREAMS = {"steering", "behavior", "methodology"}
+ALLOWED_PATTERN_TYPES = {
+    "steering": {
+        "recurring_question",
+        "clarification_qa",
+        "correction",
+        "preference",
+        "authorization_grant",
+        "authorization_limit",
+        "escalation_rule",
+        "non_escalation_rule",
+    },
+    "behavior": {
+        "clarification_trigger",
+        "failure_recovery_arc",
+        "wasted_loop",
+        "verification_habit",
+        "over_asking",
+        "under_asking",
+        "tool_thrash",
+    },
+    "methodology": {
+        "weighted_intake",
+        "strategy_review",
+        "plan_spike_build_verify",
+        "ticket_contract",
+        "dogfooding",
+        "review_gate",
+        "expected_vs_actual",
+        "routing_decision",
+        "other_emergent",
+    },
+}
+ALLOWED_STREAMS = set(ALLOWED_PATTERN_TYPES)
 
 
 @dataclass(frozen=True)
@@ -31,19 +63,36 @@ def _json_from_text(text: str) -> dict[str, Any]:
     return json.loads(match.group(0))
 
 
+def _pattern_evidence_ok(stream: str, pattern_type: str, evidence_rows: list[sqlite3.Row], quotes: list[str]) -> bool:
+    if stream == "steering" and any(row["actor"] != "leon" for row in evidence_rows):
+        return False
+    if stream == "methodology" and any(row["actor"] != "agent" for row in evidence_rows):
+        return False
+    if pattern_type == "clarification_trigger":
+        return len(evidence_rows) == 1 and evidence_rows[0]["actor"] == "agent" and _agent_question_anchor(quotes[0])
+    if pattern_type in {"failure_recovery_arc", "tool_thrash"}:
+        return len(evidence_rows) == 1 and evidence_rows[0]["actor"] == "tool" and _actual_tool_failure(quotes[0])
+    return True
+
+
 def validate_llm_record_payloads(turns: list[sqlite3.Row], payload: dict[str, Any]) -> list[dict[str, Any]]:
     by_id = {row["turn_id"]: row for row in turns}
     valid: list[dict[str, Any]] = []
     for rec in payload.get("records", []):
         if not isinstance(rec, dict):
             continue
-        if rec.get("stream") not in ALLOWED_STREAMS:
+        stream = rec.get("stream")
+        if stream not in ALLOWED_STREAMS:
+            continue
+        if rec.get("pattern_type") not in ALLOWED_PATTERN_TYPES[stream]:
             continue
         evidence = rec.get("evidence") or []
         if not isinstance(evidence, list) or not evidence:
             continue
         ok_evidence = []
-        for ev in evidence:
+        evidence_rows = []
+        quotes = []
+        for ev in evidence[:1]:
             if not isinstance(ev, dict):
                 continue
             turn_id = ev.get("turn_id")
@@ -53,9 +102,19 @@ def validate_llm_record_payloads(turns: list[sqlite3.Row], payload: dict[str, An
                 ok_evidence = []
                 break
             ok_evidence.append({"turn_id": turn_id, "quote": quote})
-        if not ok_evidence:
+            evidence_rows.append(row)
+            quotes.append(quote)
+        if not ok_evidence or not _pattern_evidence_ok(stream, rec["pattern_type"], evidence_rows, quotes):
             continue
         clean = dict(rec)
+        if clean.get("recommended_sink") not in ALLOWED_SINKS:
+            clean["recommended_sink"] = "report_only"
+        if stream == "methodology":
+            quote_text = "\n".join(quotes)
+            # Sink decisions must be anchored on the verbatim evidence first;
+            # otherwise a generic LLM summary can mask first-person status narration.
+            if _methodology_sink(quote_text) == "report_only":
+                clean["recommended_sink"] = "report_only"
         clean["evidence"] = ok_evidence
         valid.append(clean)
     return valid
@@ -79,7 +138,7 @@ def _coerce_confidence(value: Any) -> float:
     return 0.65
 
 
-def _candidate_turns(turns: list[sqlite3.Row], *, max_turns: int = 36) -> list[sqlite3.Row]:
+def _candidate_turns(turns: list[sqlite3.Row], *, max_turns: int = 20) -> list[sqlite3.Row]:
     keywords = re.compile(
         r"\b(fable|opus|strategy|pilot|plan|test|implement|verify|review|dogfood|weighted|ticket|ask|asked|question|should|instead|don't|do not|failed|error|traceback|approval|authorize|confirm)\b",
         re.I,
@@ -104,15 +163,16 @@ def _prompt_for_turns(turns: list[sqlite3.Row]) -> str:
         "Extract evidence-backed conversation-mining records for Leon/Hermes autonomy.",
         "Return JSON only: {\"records\":[...]}",
         "Each record must have stream, pattern_type, summary, actor, scope, confidence, recommended_sink, evidence.",
-        "Allowed streams: steering, behavior, methodology.",
+        "Allowed pattern_type values by stream:",
+        json.dumps({k: sorted(v) for k, v in ALLOWED_PATTERN_TYPES.items()}),
         "Evidence items must use exact turn_id and a quote copied verbatim from that turn.",
-        "Prefer high-precision records over many records. Max 8 records.",
+        "Prefer high-precision records over many records. Max 3 records. Keep summaries under 160 chars and quotes short.",
         "",
         "Turn list:",
     ]
     for row in _candidate_turns(turns):
         text, _ = mask_sensitive(row["text"])
-        text = text.replace("\n", " ")[:420]
+        text = text.replace("\n", " ")[:280]
         lines.append(f"- turn_id={row['turn_id']} actor={row['actor']} tool={row['tool_name'] or ''}: {text}")
     return "\n".join(lines)
 
@@ -121,8 +181,9 @@ def run_llm_extractors(
     conn: sqlite3.Connection,
     *,
     base_url: str = "http://127.0.0.1:8080",
-    extractor_version: str = "local-qwen3-32b-q4km-v1",
+    extractor_version: str = "local-qwen3-32b-q4km-v3",
     max_sessions: int | None = None,
+    timeout: int = 120,
 ) -> LLMExtractSummary:
     h = health(base_url)
     if not h.ok:
@@ -131,8 +192,9 @@ def run_llm_extractors(
         "select session_id from sessions where status in ('normalized','extracted','verified') order by session_id"
     ).fetchall()
     created = processed = errors = 0
+    attempted = 0
     for sess in rows:
-        if max_sessions is not None and processed >= max_sessions:
+        if max_sessions is not None and attempted >= max_sessions:
             break
         sid = sess["session_id"]
         existing = conn.execute(
@@ -141,9 +203,16 @@ def run_llm_extractors(
         ).fetchone()[0]
         if existing:
             continue
+        prior_failures = conn.execute(
+            "select count(*) from errors where session_id=? and error_class='llm_extract_error'",
+            (sid,),
+        ).fetchone()[0]
+        if prior_failures >= 2:
+            continue
         turns = conn.execute("select * from turns where session_id=? order by idx", (sid,)).fetchall()
+        attempted += 1
         try:
-            payload = chat_json(_prompt_for_turns(turns), base_url=base_url)["json"]
+            payload = chat_json(_prompt_for_turns(turns), base_url=base_url, timeout=timeout)["json"]
             valid = validate_llm_record_payloads(turns, payload)
             for rec in valid:
                 evidence_rows = [next(row for row in turns if row["turn_id"] == ev["turn_id"]) for ev in rec["evidence"]]
@@ -161,6 +230,7 @@ def run_llm_extractors(
                     confidence=_coerce_confidence(rec.get("confidence")),
                     recommended_sink=str(rec.get("recommended_sink") or "report_only")[:80],
                 )
+            conn.commit()
             processed += 1
         except Exception as exc:
             errors += 1

@@ -13,6 +13,23 @@ def _table_counts(conn: sqlite3.Connection, column: str) -> Counter[str]:
     return Counter({row["k"]: row["c"] for row in rows})
 
 
+def _append_record(lines: list[str], row: sqlite3.Row, *, include_quotes: bool) -> None:
+    lines.append(f"### {row['stream']} / {row['pattern_type']}")
+    lines.append("")
+    lines.append(f"- summary: {row['summary']}")
+    lines.append(f"- sensitivity: {row['sensitivity']}")
+    lines.append(f"- recommended_sink: {row['recommended_sink']}")
+    if include_quotes:
+        if row["sensitivity"] != "internal":
+            lines.append(f"> [SUPPRESSED_{row['sensitivity'].upper()}_QUOTE]")
+        else:
+            evidence = json.loads(row["evidence_json"])
+            for ev in evidence[:1]:
+                quote, _ = mask_sensitive(ev["quote"])
+                lines.append(f"> {quote[:700]}")
+    lines.append("")
+
+
 def write_pilot_report(
     conn: sqlite3.Connection,
     path: str | Path,
@@ -54,23 +71,24 @@ def write_pilot_report(
     lines.extend(["", "## Sensitivity counts", ""])
     for key, value in sensitivity_counts.items():
         lines.append(f"- {key}: {value}")
-    lines.extend(["", "## Example records", ""])
+    lines.extend(["", "## Error classes", ""])
+    for row in conn.execute("select error_class, count(*) as c from errors group by error_class order by c desc"):
+        lines.append(f"- {row['error_class']}: {row['c']}")
 
-    for row in conn.execute(
-        "select stream, pattern_type, summary, evidence_json, sensitivity, recommended_sink from records order by stream, pattern_type limit ?",
-        (max_examples,),
-    ):
-        lines.append(f"### {row['stream']} / {row['pattern_type']}")
-        lines.append("")
-        lines.append(f"- summary: {row['summary']}")
-        lines.append(f"- sensitivity: {row['sensitivity']}")
-        lines.append(f"- recommended_sink: {row['recommended_sink']}")
-        if include_quotes:
-            evidence = json.loads(row["evidence_json"])
-            for ev in evidence[:3]:
-                quote, _ = mask_sensitive(ev["quote"])
-                lines.append(f"> {quote[:1000]}")
-        lines.append("")
+    lines.extend(["", "## Examples by top pattern", ""])
+    for pattern, _count in pattern_counts.most_common(10):
+        rows = conn.execute(
+            """
+            select stream, pattern_type, summary, evidence_json, sensitivity, recommended_sink
+            from records
+            where pattern_type=?
+            order by case when sensitivity='internal' then 0 else 1 end, confidence desc
+            limit ?
+            """,
+            (pattern, max_examples),
+        ).fetchall()
+        for row in rows:
+            _append_record(lines, row, include_quotes=include_quotes)
 
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     return path

@@ -2,7 +2,7 @@
 {"role":"assistant","content":"Should I ask before running tests?"}
 {"role":"user","content":"No, routine tests are fine. Ask only before destructive changes, spend, deploys, or credentials."}
 {"role":"assistant","content":"I will inspect the repo and run pytest."}
-{"role":"tool","tool_name":"terminal","content":"git status --short\npytest -q\nFAILED test_example.py::test_x"}
+{"role":"tool","tool_name":"terminal","content":"git status --short\npytest -q\nFAILED test_example.py::test_x\nexit_code: 1"}
 {"role":"assistant","content":"The tests failed; I will read the traceback and fix the root cause."}
 {"role":"user","content":"Use Fable for strategy review after the pilot, not for every tiny code edit."}
 {"role":"assistant","content":"I found the repeated pattern: plan, test, implement, verify, then review."}

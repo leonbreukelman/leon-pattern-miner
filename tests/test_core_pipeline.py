@@ -834,4 +834,5 @@ def test_monitor_scripts_are_resilient_and_amortized():
     assert "extract_status=" in once
     assert "report_status=" in once
     assert "monitor extract failed" in once
+    assert "r.extractor='local_llm'" in loop
     assert 'LLM_BATCH="${LLM_BATCH:-25}"' in loop

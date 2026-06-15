@@ -1,0 +1,172 @@
+{
+  "name": "cie-extraction-v0",
+  "version": "0-public-fixture",
+  "purpose": "Public-safe synthetic fixture for CIE benchmark loader/scorer/runner tests. Real conversation-derived benchmark data stays local/ignored.",
+  "built_from": "Synthetic public fixture preserving Phase C0 v0 shape and baseline scoring metrics; not raw conversation data.",
+  "gold_extractor": "synthetic-public-opus-reference",
+  "baseline_extractor": "synthetic-public-qwen-baseline",
+  "sampling": {
+    "method": "synthetic short/medium/long shape copied from private v0",
+    "per_bucket": 5,
+    "seed": 13
+  },
+  "codebook_sha256_16": "4630556c8742dbe5",
+  "window_params": {
+    "max_window_tokens": 3500,
+    "overlap_tokens": 600
+  },
+  "scoring": {
+    "module": "leon_pattern_miner.cie_recall.score_recall",
+    "match": "per-session, per codebook_code, greedy one-to-one (code-level)",
+    "quote_strict_available": true
+  },
+  "totals": {
+    "sessions": 15,
+    "turns": 287,
+    "gold_findings": 51,
+    "qwen_baseline_findings": 29
+  },
+  "buckets": {
+    "short": 5,
+    "medium": 5,
+    "long": 5
+  },
+  "known_baseline_result": {
+    "qwen_recall_vs_opus": 0.35,
+    "qwen_quote_strict_recall": 0.29,
+    "qwen_agreement_precision": 0.62,
+    "per_bucket_recall": {
+      "short": 0.5,
+      "medium": 0.4,
+      "long": 0.28
+    },
+    "caveat": "public synthetic fixture; real private benchmark required for model-quality claims"
+  },
+  "public_safety": {
+    "contains_raw_conversation_text": false,
+    "contains_synthetic_fixture_text_only": true,
+    "private_source_backup": "runtime/private-benchmark-backup-2026-06-15/cie-extraction-v0 (ignored local path)"
+  },
+  "entries": [
+    {
+      "session_id": "fixture:fixture_short_01",
+      "file": "fixture_short_01",
+      "bucket": "short",
+      "turns": 3,
+      "gold_findings": 2,
+      "qwen_findings": 3
+    },
+    {
+      "session_id": "fixture:fixture_short_02",
+      "file": "fixture_short_02",
+      "bucket": "short",
+      "turns": 2,
+      "gold_findings": 3,
+      "qwen_findings": 1
+    },
+    {
+      "session_id": "fixture:fixture_short_03",
+      "file": "fixture_short_03",
+      "bucket": "short",
+      "turns": 2,
+      "gold_findings": 3,
+      "qwen_findings": 3
+    },
+    {
+      "session_id": "fixture:fixture_short_04",
+      "file": "fixture_short_04",
+      "bucket": "short",
+      "turns": 2,
+      "gold_findings": 2,
+      "qwen_findings": 1
+    },
+    {
+      "session_id": "fixture:fixture_short_05",
+      "file": "fixture_short_05",
+      "bucket": "short",
+      "turns": 2,
+      "gold_findings": 2,
+      "qwen_findings": 1
+    },
+    {
+      "session_id": "fixture:fixture_medium_01",
+      "file": "fixture_medium_01",
+      "bucket": "medium",
+      "turns": 5,
+      "gold_findings": 1,
+      "qwen_findings": 2
+    },
+    {
+      "session_id": "fixture:fixture_medium_02",
+      "file": "fixture_medium_02",
+      "bucket": "medium",
+      "turns": 9,
+      "gold_findings": 3,
+      "qwen_findings": 2
+    },
+    {
+      "session_id": "fixture:fixture_medium_03",
+      "file": "fixture_medium_03",
+      "bucket": "medium",
+      "turns": 5,
+      "gold_findings": 1,
+      "qwen_findings": 0
+    },
+    {
+      "session_id": "fixture:fixture_medium_04",
+      "file": "fixture_medium_04",
+      "bucket": "medium",
+      "turns": 17,
+      "gold_findings": 3,
+      "qwen_findings": 1
+    },
+    {
+      "session_id": "fixture:fixture_medium_05",
+      "file": "fixture_medium_05",
+      "bucket": "medium",
+      "turns": 13,
+      "gold_findings": 2,
+      "qwen_findings": 2
+    },
+    {
+      "session_id": "fixture:fixture_long_01",
+      "file": "fixture_long_01",
+      "bucket": "long",
+      "turns": 32,
+      "gold_findings": 4,
+      "qwen_findings": 0
+    },
+    {
+      "session_id": "fixture:fixture_long_02",
+      "file": "fixture_long_02",
+      "bucket": "long",
+      "turns": 29,
+      "gold_findings": 6,
+      "qwen_findings": 0
+    },
+    {
+      "session_id": "fixture:fixture_long_03",
+      "file": "fixture_long_03",
+      "bucket": "long",
+      "turns": 56,
+      "gold_findings": 7,
+      "qwen_findings": 4
+    },
+    {
+      "session_id": "fixture:fixture_long_04",
+      "file": "fixture_long_04",
+      "bucket": "long",
+      "turns": 58,
+      "gold_findings": 8,
+      "qwen_findings": 4
+    },
+    {
+      "session_id": "fixture:fixture_long_05",
+      "file": "fixture_long_05",
+      "bucket": "long",
+      "turns": 52,
+      "gold_findings": 4,
+      "qwen_findings": 5
+    }
+  ]
+}

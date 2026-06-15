@@ -1,0 +1,96 @@
+{
+  "session_id": "fixture:fixture_short_03",
+  "extractor": "synthetic-public-opus-reference",
+  "records": [
+    {
+      "record_id": "gold-fixture_short_03-01",
+      "window_id": "fixture:fixture_short_03:w0",
+      "family": "all",
+      "codebook_code": "model_routing",
+      "unit": "turn",
+      "statement": "Public fixture gold finding 1 for fixture_short_03.",
+      "actor": "leon",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "confidence": "high",
+      "confidence_basis": "Synthetic public fixture preserving benchmark scoring shape.",
+      "sensitivity": "public_fixture",
+      "evidence": [
+        {
+          "turn_id": "fixture:fixture_short_03:0",
+          "quote": "public fixture evidence quote fixture_short_03 gold 1 anchors behavior"
+        },
+        {
+          "turn_id": "fixture:fixture_short_03:0",
+          "quote": "second public fixture quote fixture_short_03 gold 1 supports finding"
+        }
+      ],
+      "facets": {},
+      "assumptions": [],
+      "alternative_interpretations": [],
+      "disconfirming_evidence": [],
+      "falsifiers": [],
+      "quote_verified": true
+    },
+    {
+      "record_id": "gold-fixture_short_03-02",
+      "window_id": "fixture:fixture_short_03:w0",
+      "family": "all",
+      "codebook_code": "verification_review",
+      "unit": "turn",
+      "statement": "Public fixture gold finding 2 for fixture_short_03.",
+      "actor": "agent",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "confidence": "high",
+      "confidence_basis": "Synthetic public fixture preserving benchmark scoring shape.",
+      "sensitivity": "public_fixture",
+      "evidence": [
+        {
+          "turn_id": "fixture:fixture_short_03:0",
+          "quote": "public fixture evidence quote fixture_short_03 gold 2 anchors behavior"
+        },
+        {
+          "turn_id": "fixture:fixture_short_03:0",
+          "quote": "second public fixture quote fixture_short_03 gold 2 supports finding"
+        }
+      ],
+      "facets": {},
+      "assumptions": [],
+      "alternative_interpretations": [],
+      "disconfirming_evidence": [],
+      "falsifiers": [],
+      "quote_verified": true
+    },
+    {
+      "record_id": "gold-fixture_short_03-03",
+      "window_id": "fixture:fixture_short_03:w0",
+      "family": "all",
+      "codebook_code": "failure_recovery",
+      "unit": "turn",
+      "statement": "Public fixture gold finding 3 for fixture_short_03.",
+      "actor": "leon",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "confidence": "high",
+      "confidence_basis": "Synthetic public fixture preserving benchmark scoring shape.",
+      "sensitivity": "public_fixture",
+      "evidence": [
+        {
+          "turn_id": "fixture:fixture_short_03:0",
+          "quote": "public fixture evidence quote fixture_short_03 gold 3 anchors behavior"
+        },
+        {
+          "turn_id": "fixture:fixture_short_03:0",
+          "quote": "second public fixture quote fixture_short_03 gold 3 supports finding"
+        }
+      ],
+      "facets": {},
+      "assumptions": [],
+      "alternative_interpretations": [],
+      "disconfirming_evidence": [],
+      "falsifiers": [],
+      "quote_verified": true
+    }
+  ]
+}

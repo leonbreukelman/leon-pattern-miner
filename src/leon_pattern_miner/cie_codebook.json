@@ -1,0 +1,393 @@
+{
+  "version": "cie-v1-opus-seeded-2026-06-12",
+  "codes": [
+    {
+      "code": "correction_preference",
+      "family": "correction_preference",
+      "definition": "User corrects the agent's target, output, or behavior, or states a preference about how work should be done.",
+      "includes": [
+        "redirecting to the right target",
+        "rejecting an answer/approach",
+        "stating a do/don't preference"
+      ],
+      "excludes": [
+        "communication form-only preferences (use communication_preference)",
+        "initial open requests with no correction",
+        "scope/permission limits (use authorization_limit)"
+      ],
+      "unit": [
+        "turn",
+        "exchange"
+      ]
+    },
+    {
+      "code": "communication_preference",
+      "family": "correction_preference",
+      "definition": "User preference about the form, length, tone, or framing of agent responses.",
+      "includes": [
+        "conciseness",
+        "no jargon",
+        "context-window sizing",
+        "report structure"
+      ],
+      "excludes": [
+        "corrections about content correctness",
+        "scope limits"
+      ],
+      "unit": [
+        "turn",
+        "session"
+      ]
+    },
+    {
+      "code": "authorization_limit",
+      "family": "authorization_limit",
+      "definition": "An explicit boundary on what the agent may do, whether user-stated or system-enforced.",
+      "includes": [
+        "read-only scope",
+        "do-not-send/draft-only",
+        "hardline blocklist refusals",
+        "bounded autonomy grants with escalation"
+      ],
+      "excludes": [
+        "routing of work to another model (use model_routing)",
+        "review gating (use verification_review)"
+      ],
+      "unit": [
+        "turn",
+        "exchange",
+        "session"
+      ]
+    },
+    {
+      "code": "model_routing",
+      "family": "model_routing",
+      "definition": "Decision or instruction to route a task or decision to a specific model/agent.",
+      "includes": [
+        "delegating review/strategy to Fable",
+        "escalation to a named representative model"
+      ],
+      "excludes": [
+        "task/board selection among tickets",
+        "generic delegation without a named target"
+      ],
+      "unit": [
+        "turn",
+        "session"
+      ]
+    },
+    {
+      "code": "verification_review",
+      "family": "verification_review",
+      "definition": "A review/verification gate, its ordering, or its outcome.",
+      "includes": [
+        "spec-before-quality gating",
+        "independent review verdicts",
+        "verification-before-action"
+      ],
+      "excludes": [
+        "the halt behavior itself (use failure_recovery)"
+      ],
+      "unit": [
+        "arc",
+        "session"
+      ]
+    },
+    {
+      "code": "failure_recovery",
+      "family": "failure_recovery",
+      "definition": "Detection of a failure followed by a halt, rollback, or recovery action.",
+      "includes": [
+        "stopping at a failed gate",
+        "rerunning after a fixed bug",
+        "not proceeding downstream on REQUEST_CHANGES"
+      ],
+      "excludes": [
+        "clean success/status reports",
+        "review verdict itself (use verification_review)"
+      ],
+      "unit": [
+        "arc",
+        "session"
+      ]
+    },
+    {
+      "code": "methodology_workflow",
+      "family": "methodology_workflow",
+      "definition": "A repeatable procedure or decision rule for how work is selected and executed.",
+      "includes": [
+        "artifact-driven next-task selection",
+        "deliberate config/design rationale",
+        "controlled phase sequencing"
+      ],
+      "excludes": [
+        "one-off corrections",
+        "scope limits"
+      ],
+      "unit": [
+        "session",
+        "arc"
+      ]
+    }
+  ],
+  "few_shots": [
+    {
+      "source_family": "correction_preference",
+      "codebook_code": "correction_preference",
+      "unit": "turn",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "evidence": [
+        {
+          "turn_id": "hermes:20260609_225509_ff73c0:13",
+          "quote": "that was the wrong kanban, i was refering to the hermes kanban"
+        }
+      ],
+      "statement": "Leon corrects the agent for acting on the wrong target (wrong Kanban board) and redirects to the Hermes board.",
+      "why": "Clean explicit correction marker (\"that was the wrong\"); first-person user evidence; canonical recall anchor for the family.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "correction_preference",
+      "codebook_code": "communication_preference",
+      "unit": "turn",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "evidence": [
+        {
+          "turn_id": "hermes:20260610_131740_5138aa:31",
+          "quote": "consice and without technical jargon, that would fit into my context window"
+        }
+      ],
+      "statement": "Leon wants status reports concise, jargon-free, and sized to fit his context window.",
+      "why": "Durable stylistic/communication preference stated directly; distinguishes correction-of-content from preference-of-form.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "correction_preference",
+      "codebook_code": "authorization_limit",
+      "unit": "session",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "evidence": [
+        {
+          "turn_id": "hermes:20260610_064459_f6e5b2:0",
+          "quote": "Do not edit files or post to GitHub."
+        }
+      ],
+      "statement": "Leon scopes the session as read-only: review only, no file edits and no GitHub posting.",
+      "why": "Cross-family example (lives under correction_preference but codes as authorization_limit); explicit scope ceiling set at session open.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "authorization_limit",
+      "codebook_code": "authorization_limit",
+      "unit": "exchange",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "evidence": [
+        {
+          "turn_id": "hermes:20260610_111220_541d99:8",
+          "quote": "check and confirm it is safe to reboot"
+        },
+        {
+          "turn_id": "hermes:20260610_111220_541d99:9",
+          "quote": "BLOCKED (hardline): system shutdown/reboot."
+        }
+      ],
+      "statement": "A reboot request hits an unconditional hardline blocklist; the agent cannot execute system shutdown/reboot.",
+      "why": "System-enforced hard limit with paired request+block turns; teaches grading enforced refusals as A/1 and the exchange unit.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "correction_preference",
+      "codebook_code": "authorization_limit",
+      "unit": "turn",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "evidence": [
+        {
+          "turn_id": "hermes:20260609_192509_527484:20",
+          "quote": "do not send it, save it in drafts"
+        }
+      ],
+      "statement": "Leon authorizes drafting an outbound email but forbids sending it; it must be saved as a draft.",
+      "why": "Explicit outbound-action limit; useful near-boundary case where family label differs from code (prevents mislabeling as plain correction).",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "authorization_limit",
+      "codebook_code": "authorization_limit",
+      "unit": "session",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "evidence": [
+        {
+          "turn_id": "hermes:20260609_225509_ff73c0:21",
+          "quote": "unblock this and start working on them, when you need a decision or do not know or have low confidence ask fable"
+        }
+      ],
+      "statement": "Leon grants autonomy to unblock and execute, with an escalation rule to consult Fable on low-confidence decisions.",
+      "why": "Defines an autonomy boundary plus escalation path; combines authorization grant with a routing/escalation condition.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "authorization_limit",
+      "codebook_code": "model_routing",
+      "unit": "session",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "evidence": [
+        {
+          "turn_id": "hermes:20260609_222957_c4017c:0",
+          "quote": "use fable to review this project"
+        }
+      ],
+      "statement": "Leon routes review/strategy and consolidation work to Fable as his representative.",
+      "why": "Recurring model-routing signal (Fable for review/direction); the true model_routing pool is weak, so this cross-family instance is the cleanest anchor.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "model_routing",
+      "codebook_code": "none",
+      "unit": "turn",
+      "source_reliability": "C",
+      "info_credibility": 6,
+      "evidence": [
+        {
+          "turn_id": "hermes:cron_836d512f8dc9_20260609_123223:2",
+          "quote": "[SILENT]"
+        }
+      ],
+      "statement": "No routing decision present; the turn is a silent/no-op agent emission.",
+      "why": "Near-miss: family-labeled model_routing but contains no extractable claim; teaches the model to emit a zero-record marker instead of fabricating.",
+      "negative_or_near_miss": true
+    },
+    {
+      "source_family": "verification_review",
+      "codebook_code": "verification_review",
+      "unit": "arc",
+      "source_reliability": "B",
+      "info_credibility": 2,
+      "evidence": [
+        {
+          "turn_id": "hermes:cron_f66b0f341dc7_20260504_100655:0",
+          "quote": "spec compliance must pass before quality rev"
+        }
+      ],
+      "statement": "Review workflow gates on spec compliance before any quality/security review can run.",
+      "why": "Explicit review-gate ordering rule; agent self-report so graded B/2 rather than confirmed.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "failure_recovery",
+      "codebook_code": "failure_recovery",
+      "unit": "session",
+      "source_reliability": "B",
+      "info_credibility": 2,
+      "evidence": [
+        {
+          "turn_id": "hermes:cron_f66b0f341dc7_20260504_100655:0",
+          "quote": "so I stopped at the spec/revision gate and did"
+        }
+      ],
+      "statement": "On a failed review (REQUEST_CHANGES) the agent halted at the gate and did not proceed downstream.",
+      "why": "Failure-detection-then-halt behavior; same source as the verification example shows one window yielding two distinct codes.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "methodology_workflow",
+      "codebook_code": "methodology_workflow",
+      "unit": "session",
+      "source_reliability": "B",
+      "info_credibility": 2,
+      "evidence": [
+        {
+          "turn_id": "hermes:cron_f66b0f341dc7_20260504_011403:0",
+          "quote": "because filesystem inspection showed"
+        },
+        {
+          "turn_id": "hermes:cron_f66b0f341dc7_20260504_011403:0",
+          "quote": "The primary plan lists Phase 5.1 as the next substantive incomplete task."
+        }
+      ],
+      "statement": "Recurring evidence-grounded task-selection workflow: inspect filesystem/status artifacts, then select the next plan-recommended phase.",
+      "why": "Captures the stable autonomous-run methodology (artifact-driven next-task selection) seen repeatedly across cron sessions.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "correction_preference",
+      "codebook_code": "none",
+      "unit": "turn",
+      "source_reliability": "A",
+      "info_credibility": 6,
+      "evidence": [
+        {
+          "turn_id": "hermes:20260610_115800_f5dfd9:0",
+          "quote": "the patterns I am looking for is the questions I keep asking, the directions I keep giving"
+        }
+      ],
+      "statement": "Initial open-ended request describing the mining goal; no correction event present.",
+      "why": "Near-miss: family-labeled correction_preference but the turn is a fresh question, not a correction; guards against false-positive correction tagging.",
+      "negative_or_near_miss": true
+    },
+    {
+      "source_family": "failure_recovery",
+      "codebook_code": "none",
+      "unit": "session",
+      "source_reliability": "B",
+      "info_credibility": 2,
+      "evidence": [
+        {
+          "turn_id": "hermes:cron_f1a3a4d5e24c_20260503_210311:0",
+          "quote": "No failed jobs to report."
+        }
+      ],
+      "statement": "Clean success report (PR merged, CI green); no failure occurred and nothing was recovered.",
+      "why": "Near-miss: distinguishes a success/status report from genuine failure_recovery; prevents tagging routine green runs.",
+      "negative_or_near_miss": true
+    }
+  ],
+  "passes": [
+    {
+      "family": "correction_preference",
+      "codes": [
+        "correction_preference",
+        "communication_preference"
+      ],
+      "notes": "Recall-biased; only load these two cards to reduce code confusion."
+    },
+    {
+      "family": "authorization_limit",
+      "codes": [
+        "authorization_limit",
+        "model_routing"
+      ],
+      "notes": "Co-run because limits and named-model routing/escalation co-occur; grade enforced blocks A/1."
+    },
+    {
+      "family": "verification_review",
+      "codes": [
+        "verification_review",
+        "failure_recovery"
+      ],
+      "notes": "Same source often yields both a gate rule and a halt; allow multiple records per turn."
+    },
+    {
+      "family": "methodology_workflow",
+      "codes": [
+        "methodology_workflow"
+      ],
+      "notes": "Target durable selection/sequencing rules, not per-run narration."
+    }
+  ],
+  "prompt_rules": [
+    "Recall first: emit low-confidence candidates with a confidence field; a second validation pass filters, rather than precision-biasing at discovery.",
+    "Every record MUST carry at least one evidence object: existing turn_id plus a verbatim quote that is a substring of that turn.",
+    "Quotes must be copied, never paraphrased; if no verbatim quote exists, do not emit the record.",
+    "Output strict JSON per schema; one record per finding; enforce unit\u2208{turn,exchange,arc,session}, source_reliability\u2208A..F, info_credibility\u22081..6.",
+    "Grade reliability by actor: direct Leon instruction or system-enforced block = A; agent self-report = B/C; unjudgeable = F.",
+    "Always emit a window/session progress marker, including an explicit zero-record marker when nothing is found (fixes prior under-extraction silence).",
+    "Allow a finding's codebook_code to differ from the source family label; carry both."
+  ]
+}

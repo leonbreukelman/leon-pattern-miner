@@ -1,0 +1,470 @@
+{
+  "session_id": "fixture:fixture_long_04",
+  "bucket": "long",
+  "turns": [
+    {
+      "turn_id": "fixture:fixture_long_04:0",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 0,
+      "actor": "leon",
+      "text": "Synthetic public benchmark fixture. [public fixture evidence quote fixture_long_04 gold 1 anchors behavior] [public fixture evidence quote fixture_long_04 gold 2 anchors behavior] [public fixture evidence quote fixture_long_04 gold 3 anchors behavior] [public fixture evidence quote fixture_long_04 gold 4 anchors behavior] [public fixture evidence quote fixture_long_04 gold 5 anchors behavior] [public fixture evidence quote fixture_long_04 gold 6 anchors behavior] [public fixture evidence quote fixture_long_04 gold 7 anchors behavior] [public fixture evidence quote fixture_long_04 gold 8 anchors behavior]",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:1",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 1,
+      "actor": "agent",
+      "text": "Synthetic filler turn 1 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:2",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 2,
+      "actor": "leon",
+      "text": "Synthetic filler turn 2 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:3",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 3,
+      "actor": "agent",
+      "text": "Synthetic filler turn 3 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:4",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 4,
+      "actor": "leon",
+      "text": "Synthetic filler turn 4 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:5",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 5,
+      "actor": "agent",
+      "text": "Synthetic filler turn 5 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:6",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 6,
+      "actor": "leon",
+      "text": "Synthetic filler turn 6 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:7",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 7,
+      "actor": "agent",
+      "text": "Synthetic filler turn 7 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:8",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 8,
+      "actor": "leon",
+      "text": "Synthetic filler turn 8 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:9",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 9,
+      "actor": "agent",
+      "text": "Synthetic filler turn 9 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:10",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 10,
+      "actor": "leon",
+      "text": "Synthetic filler turn 10 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:11",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 11,
+      "actor": "agent",
+      "text": "Synthetic filler turn 11 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:12",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 12,
+      "actor": "leon",
+      "text": "Synthetic filler turn 12 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:13",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 13,
+      "actor": "agent",
+      "text": "Synthetic filler turn 13 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:14",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 14,
+      "actor": "leon",
+      "text": "Synthetic filler turn 14 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:15",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 15,
+      "actor": "agent",
+      "text": "Synthetic filler turn 15 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:16",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 16,
+      "actor": "leon",
+      "text": "Synthetic filler turn 16 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:17",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 17,
+      "actor": "agent",
+      "text": "Synthetic filler turn 17 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:18",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 18,
+      "actor": "leon",
+      "text": "Synthetic filler turn 18 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:19",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 19,
+      "actor": "agent",
+      "text": "Synthetic filler turn 19 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:20",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 20,
+      "actor": "leon",
+      "text": "Synthetic filler turn 20 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:21",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 21,
+      "actor": "agent",
+      "text": "Synthetic filler turn 21 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:22",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 22,
+      "actor": "leon",
+      "text": "Synthetic filler turn 22 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:23",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 23,
+      "actor": "agent",
+      "text": "Synthetic filler turn 23 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:24",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 24,
+      "actor": "leon",
+      "text": "Synthetic filler turn 24 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:25",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 25,
+      "actor": "agent",
+      "text": "Synthetic filler turn 25 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:26",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 26,
+      "actor": "leon",
+      "text": "Synthetic filler turn 26 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:27",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 27,
+      "actor": "agent",
+      "text": "Synthetic filler turn 27 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:28",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 28,
+      "actor": "leon",
+      "text": "Synthetic filler turn 28 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:29",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 29,
+      "actor": "agent",
+      "text": "Synthetic filler turn 29 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:30",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 30,
+      "actor": "leon",
+      "text": "Synthetic filler turn 30 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:31",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 31,
+      "actor": "agent",
+      "text": "Synthetic filler turn 31 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:32",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 32,
+      "actor": "leon",
+      "text": "Synthetic filler turn 32 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:33",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 33,
+      "actor": "agent",
+      "text": "Synthetic filler turn 33 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:34",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 34,
+      "actor": "leon",
+      "text": "Synthetic filler turn 34 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:35",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 35,
+      "actor": "agent",
+      "text": "Synthetic filler turn 35 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:36",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 36,
+      "actor": "leon",
+      "text": "Synthetic filler turn 36 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:37",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 37,
+      "actor": "agent",
+      "text": "Synthetic filler turn 37 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:38",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 38,
+      "actor": "leon",
+      "text": "Synthetic filler turn 38 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:39",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 39,
+      "actor": "agent",
+      "text": "Synthetic filler turn 39 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:40",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 40,
+      "actor": "leon",
+      "text": "Synthetic filler turn 40 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:41",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 41,
+      "actor": "agent",
+      "text": "Synthetic filler turn 41 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:42",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 42,
+      "actor": "leon",
+      "text": "Synthetic filler turn 42 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:43",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 43,
+      "actor": "agent",
+      "text": "Synthetic filler turn 43 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:44",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 44,
+      "actor": "leon",
+      "text": "Synthetic filler turn 44 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:45",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 45,
+      "actor": "agent",
+      "text": "Synthetic filler turn 45 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:46",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 46,
+      "actor": "leon",
+      "text": "Synthetic filler turn 46 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:47",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 47,
+      "actor": "agent",
+      "text": "Synthetic filler turn 47 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:48",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 48,
+      "actor": "leon",
+      "text": "Synthetic filler turn 48 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:49",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 49,
+      "actor": "agent",
+      "text": "Synthetic filler turn 49 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:50",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 50,
+      "actor": "leon",
+      "text": "Synthetic filler turn 50 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:51",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 51,
+      "actor": "agent",
+      "text": "Synthetic filler turn 51 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:52",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 52,
+      "actor": "leon",
+      "text": "Synthetic filler turn 52 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:53",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 53,
+      "actor": "agent",
+      "text": "Synthetic filler turn 53 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:54",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 54,
+      "actor": "leon",
+      "text": "Synthetic filler turn 54 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:55",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 55,
+      "actor": "agent",
+      "text": "Synthetic filler turn 55 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:56",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 56,
+      "actor": "leon",
+      "text": "Synthetic filler turn 56 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_long_04:57",
+      "session_id": "fixture:fixture_long_04",
+      "idx": 57,
+      "actor": "agent",
+      "text": "Synthetic filler turn 57 for fixture_long_04; no private transcript content.",
+      "tool_name": ""
+    }
+  ]
+}

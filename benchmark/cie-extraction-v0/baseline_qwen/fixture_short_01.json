@@ -1,0 +1,84 @@
+{
+  "session_id": "fixture:fixture_short_01",
+  "extractor": "synthetic-public-qwen-baseline",
+  "records": [
+    {
+      "record_id": "baseline-fixture_short_01-01",
+      "window_id": "fixture:fixture_short_01:w0",
+      "family": "all",
+      "codebook_code": "communication_preference",
+      "unit": "turn",
+      "statement": "Public fixture baseline finding 1 for fixture_short_01.",
+      "actor": "agent",
+      "source_reliability": "B",
+      "info_credibility": 2,
+      "confidence": "medium",
+      "confidence_basis": "Synthetic public fixture preserving baseline score.",
+      "sensitivity": "public_fixture",
+      "evidence": [
+        {
+          "turn_id": "fixture:fixture_short_01:0",
+          "quote": "public fixture evidence quote fixture_short_01 gold 1 anchors behavior"
+        }
+      ],
+      "facets": {},
+      "assumptions": [],
+      "alternative_interpretations": [],
+      "disconfirming_evidence": [],
+      "falsifiers": [],
+      "quote_verified": true
+    },
+    {
+      "record_id": "baseline-fixture_short_01-02",
+      "window_id": "fixture:fixture_short_01:w0",
+      "family": "all",
+      "codebook_code": "methodology_workflow",
+      "unit": "turn",
+      "statement": "Public fixture baseline finding 2 for fixture_short_01.",
+      "actor": "agent",
+      "source_reliability": "B",
+      "info_credibility": 2,
+      "confidence": "medium",
+      "confidence_basis": "Synthetic public fixture preserving baseline score.",
+      "sensitivity": "public_fixture",
+      "evidence": [
+        {
+          "turn_id": "fixture:fixture_short_01:0",
+          "quote": "public fixture unmatched baseline quote fixture_short_01 candidate 2"
+        }
+      ],
+      "facets": {},
+      "assumptions": [],
+      "alternative_interpretations": [],
+      "disconfirming_evidence": [],
+      "falsifiers": [],
+      "quote_verified": false
+    },
+    {
+      "record_id": "baseline-fixture_short_01-03",
+      "window_id": "fixture:fixture_short_01:w0",
+      "family": "all",
+      "codebook_code": "methodology_workflow",
+      "unit": "turn",
+      "statement": "Public fixture baseline finding 3 for fixture_short_01.",
+      "actor": "agent",
+      "source_reliability": "B",
+      "info_credibility": 2,
+      "confidence": "medium",
+      "confidence_basis": "Synthetic public fixture preserving baseline score.",
+      "sensitivity": "public_fixture",
+      "evidence": [
+        {
+          "turn_id": "fixture:fixture_short_01:0",
+          "quote": "public fixture unmatched baseline quote fixture_short_01 candidate 3"
+        }
+      ],
+      "facets": {},
+      "assumptions": [],
+      "alternative_interpretations": [],
+      "disconfirming_evidence": [],
+      "falsifiers": [],
+      "quote_verified": false
+    }
+  ]
+}

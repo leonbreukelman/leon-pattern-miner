@@ -1,0 +1,22 @@
+{
+  "session_id": "fixture:fixture_short_02",
+  "bucket": "short",
+  "turns": [
+    {
+      "turn_id": "fixture:fixture_short_02:0",
+      "session_id": "fixture:fixture_short_02",
+      "idx": 0,
+      "actor": "leon",
+      "text": "Synthetic public benchmark fixture. [public fixture evidence quote fixture_short_02 gold 1 anchors behavior] [second public fixture quote fixture_short_02 gold 1 supports finding] [public fixture evidence quote fixture_short_02 gold 2 anchors behavior] [second public fixture quote fixture_short_02 gold 2 supports finding] [public fixture evidence quote fixture_short_02 gold 3 anchors behavior] [second public fixture quote fixture_short_02 gold 3 supports finding]",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_short_02:1",
+      "session_id": "fixture:fixture_short_02",
+      "idx": 1,
+      "actor": "agent",
+      "text": "Synthetic filler turn 1 for fixture_short_02; no private transcript content.",
+      "tool_name": ""
+    }
+  ]
+}

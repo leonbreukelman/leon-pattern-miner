@@ -1,0 +1,5 @@
+{
+  "session_id": "fixture:fixture_long_01",
+  "extractor": "synthetic-public-qwen-baseline",
+  "records": []
+}

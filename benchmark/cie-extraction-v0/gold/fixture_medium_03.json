@@ -1,0 +1,32 @@
+{
+  "session_id": "fixture:fixture_medium_03",
+  "extractor": "synthetic-public-opus-reference",
+  "records": [
+    {
+      "record_id": "gold-fixture_medium_03-01",
+      "window_id": "fixture:fixture_medium_03:w0",
+      "family": "all",
+      "codebook_code": "authorization_limit",
+      "unit": "turn",
+      "statement": "Public fixture gold finding 1 for fixture_medium_03.",
+      "actor": "leon",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "confidence": "high",
+      "confidence_basis": "Synthetic public fixture preserving benchmark scoring shape.",
+      "sensitivity": "public_fixture",
+      "evidence": [
+        {
+          "turn_id": "fixture:fixture_medium_03:0",
+          "quote": "public fixture evidence quote fixture_medium_03 gold 1 anchors behavior"
+        }
+      ],
+      "facets": {},
+      "assumptions": [],
+      "alternative_interpretations": [],
+      "disconfirming_evidence": [],
+      "falsifiers": [],
+      "quote_verified": true
+    }
+  ]
+}

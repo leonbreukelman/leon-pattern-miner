@@ -4,7 +4,7 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from .extractors import _actual_tool_failure, _agent_question_anchor, _insert_record, _methodology_sink, ALLOWED_SINKS
 from .llm import chat_json, health
@@ -45,6 +45,9 @@ ALLOWED_PATTERN_TYPES = {
     },
 }
 ALLOWED_STREAMS = set(ALLOWED_PATTERN_TYPES)
+
+ChatFunc = Callable[..., dict[str, Any]]
+HealthCheck = Callable[[str], Any]
 
 
 @dataclass(frozen=True)
@@ -193,6 +196,62 @@ def _prompt_for_turns(turns: list[sqlite3.Row]) -> str:
     return "\n".join(lines)
 
 
+def planned_llm_sessions(
+    conn: sqlite3.Connection,
+    *,
+    extractor_version: str = DEFAULT_LLM_EXTRACTOR_VERSION,
+    max_sessions: int | None = None,
+) -> list[str]:
+    rows = conn.execute(
+        "select session_id from sessions where status in ('normalized','extracted','verified') order by session_id"
+    ).fetchall()
+    planned: list[str] = []
+    for sess in rows:
+        if max_sessions is not None and len(planned) >= max_sessions:
+            break
+        sid = sess["session_id"]
+        completed = conn.execute(
+            "select 1 from llm_session_runs where session_id=? and extractor_version=? and status='processed'",
+            (sid, extractor_version),
+        ).fetchone()
+        if completed:
+            continue
+        existing = conn.execute(
+            "select count(*) from records where session_id=? and extractor='local_llm' and extractor_version=?",
+            (sid, extractor_version),
+        ).fetchone()[0]
+        if existing:
+            continue
+        prior_failures = conn.execute(
+            """
+            select count(*) from errors
+            where session_id=?
+              and error_class='llm_extract_error'
+              and extractor_version=?
+            """,
+            (sid, extractor_version),
+        ).fetchone()[0]
+        if prior_failures >= 2:
+            continue
+        planned.append(sid)
+    return planned
+
+
+def _call_chat(
+    chat_func: ChatFunc,
+    prompt: str,
+    *,
+    base_url: str,
+    timeout: int,
+    max_tokens: int,
+    model: str | None,
+) -> dict[str, Any]:
+    try:
+        return chat_func(prompt, base_url=base_url, timeout=timeout, max_tokens=max_tokens, model=model)
+    except TypeError:
+        return chat_func(prompt, base_url=base_url, timeout=timeout)
+
+
 def run_llm_extractors(
     conn: sqlite3.Connection,
     *,
@@ -200,8 +259,13 @@ def run_llm_extractors(
     extractor_version: str = DEFAULT_LLM_EXTRACTOR_VERSION,
     max_sessions: int | None = None,
     timeout: int = 120,
+    llm_max_tokens: int = 1536,
+    model: str | None = None,
+    chat_func: ChatFunc | None = None,
+    health_check: HealthCheck | None = None,
 ) -> LLMExtractSummary:
-    h = health(base_url)
+    health_fn = health_check or health
+    h = health_fn(base_url)
     if not h.ok:
         return LLMExtractSummary(errors=1)
     rows = conn.execute(
@@ -241,7 +305,14 @@ def run_llm_extractors(
         turns = conn.execute("select * from turns where session_id=? order by idx", (sid,)).fetchall()
         attempted += 1
         try:
-            payload = chat_json(_prompt_for_turns(turns), base_url=base_url, timeout=timeout)["json"]
+            payload = _call_chat(
+                chat_func or chat_json,
+                _prompt_for_turns(turns),
+                base_url=base_url,
+                timeout=timeout,
+                max_tokens=llm_max_tokens,
+                model=model,
+            )["json"]
             valid = validate_llm_record_payloads(turns, payload)
             session_created = 0
             for rec in valid:

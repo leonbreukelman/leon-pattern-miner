@@ -6,7 +6,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 
-from .sensitivity import mask_sensitive, sensitivity_for_text
+from .sensitivity import sensitivity_for_text
 
 
 @dataclass(frozen=True)

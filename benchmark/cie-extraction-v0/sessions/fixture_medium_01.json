@@ -1,0 +1,46 @@
+{
+  "session_id": "fixture:fixture_medium_01",
+  "bucket": "medium",
+  "turns": [
+    {
+      "turn_id": "fixture:fixture_medium_01:0",
+      "session_id": "fixture:fixture_medium_01",
+      "idx": 0,
+      "actor": "leon",
+      "text": "Synthetic public benchmark fixture. [public fixture evidence quote fixture_medium_01 gold 1 anchors behavior]",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_medium_01:1",
+      "session_id": "fixture:fixture_medium_01",
+      "idx": 1,
+      "actor": "agent",
+      "text": "Synthetic filler turn 1 for fixture_medium_01; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_medium_01:2",
+      "session_id": "fixture:fixture_medium_01",
+      "idx": 2,
+      "actor": "leon",
+      "text": "Synthetic filler turn 2 for fixture_medium_01; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_medium_01:3",
+      "session_id": "fixture:fixture_medium_01",
+      "idx": 3,
+      "actor": "agent",
+      "text": "Synthetic filler turn 3 for fixture_medium_01; no private transcript content.",
+      "tool_name": ""
+    },
+    {
+      "turn_id": "fixture:fixture_medium_01:4",
+      "session_id": "fixture:fixture_medium_01",
+      "idx": 4,
+      "actor": "leon",
+      "text": "Synthetic filler turn 4 for fixture_medium_01; no private transcript content.",
+      "tool_name": ""
+    }
+  ]
+}

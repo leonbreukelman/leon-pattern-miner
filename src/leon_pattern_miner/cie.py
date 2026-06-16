@@ -84,6 +84,13 @@ class CIEWindow:
 
 
 @dataclass(frozen=True)
+class CIEPromptBundle:
+    prompt: str
+    family: str
+    quote_sources: dict[str, str]
+
+
+@dataclass(frozen=True)
 class CIERunSummary:
     sessions_processed: int = 0
     windows_considered: int = 0
@@ -204,10 +211,20 @@ def build_session_windows(
 def families_for_window(window: CIEWindow) -> list[str]:
     text = "\n".join(str(turn.get("text") or "") for turn in window.turns)
     families = [family for family, pattern in FAMILY_PATTERNS.items() if pattern.search(text)]
-    # Model-routing is often embedded in authorization instructions; keep it with that family but avoid
-    # an extra pass unless the direct model-routing pattern is strong.
+    # Model-routing codes live in the authorization pass. A standalone model signal should therefore
+    # trigger authorization_limit, not a dead standalone model_routing pass.
+    if "model_routing" in families and "authorization_limit" not in families:
+        families.append("authorization_limit")
     ordered = [family for family in pass_families() if family in families]
     return ordered
+
+
+def families_for_pass_strategy(window: CIEWindow, pass_strategy: str) -> list[str]:
+    if pass_strategy == "combined":
+        return ["all"]
+    if pass_strategy == "per_family":
+        return families_for_window(window)
+    raise ValueError("pass_strategy must be 'per_family' or 'combined'")
 
 
 def _code_cards_for_family(family: str, codebook: dict[str, Any]) -> list[dict[str, Any]]:
@@ -241,13 +258,37 @@ def _few_shots_for_family(family: str, codebook: dict[str, Any], *, limit: int =
     return (positives[: max(0, limit - 2)] + negatives[:2])[:limit]
 
 
-def render_cie_prompt(
+def _turn_quote_source(turn: Mapping[str, Any], *, max_chars: int) -> str:
+    return _clean_text(str(turn.get("text") or ""), max_chars=max_chars)
+
+
+def _turn_prompt_line_from_cleaned(turn: Mapping[str, Any], cleaned_text: str) -> str:
+    tool = f" tool={turn.get('tool_name') or ''}" if turn.get("tool_name") else ""
+    return f"turn_id={turn['turn_id']} idx={turn['idx']} actor={turn['actor']}{tool}: {cleaned_text}"
+
+
+def _prompt_lines_with_turn_chars(
+    lines: list[str],
+    window: CIEWindow,
+    *,
+    max_chars: int,
+) -> tuple[list[str], dict[str, str]]:
+    quote_sources: dict[str, str] = {}
+    out = list(lines)
+    for turn in window.turns:
+        cleaned = _turn_quote_source(turn, max_chars=max_chars)
+        quote_sources[str(turn["turn_id"])] = cleaned
+        out.append(_turn_prompt_line_from_cleaned(turn, cleaned))
+    return out, quote_sources
+
+
+def render_cie_prompt_bundle(
     window: CIEWindow,
     *,
     family: str,
     max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS,
     codebook: dict[str, Any] | None = None,
-) -> str:
+) -> CIEPromptBundle:
     codebook = codebook or load_default_codebook()
     family = FAMILY_ALIASES.get(family, family)
     cards = _code_cards_for_family(family, codebook)
@@ -275,7 +316,7 @@ def render_cie_prompt(
             }
         ]
     }
-    lines = [
+    instruction_lines = [
         "You are doing CIE v1 candidate discovery for Hermes conversation intelligence.",
         "This is report-only candidate extraction, not memory promotion.",
         "Bias toward recall, but every emitted record must be evidence-backed by exact quotes.",
@@ -297,24 +338,46 @@ def render_cie_prompt(
         json.dumps(payload_schema, ensure_ascii=False),
         "Window turns:",
     ]
-    for turn in window.turns:
-        lines.append(_turn_prompt_line(turn))
+    lines, quote_sources = _prompt_lines_with_turn_chars(
+        instruction_lines,
+        window,
+        max_chars=DEFAULT_MAX_TURN_CHARS,
+    )
     prompt = "\n".join(lines)
     if estimate_tokens(prompt) <= max_prompt_tokens:
-        return prompt
+        return CIEPromptBundle(prompt=prompt, family=family, quote_sources=quote_sources)
     # If the instruction/few-shot block plus full turn text is too large, shrink turn text but never drop turns.
-    compact_lines = lines[:-len(window.turns)] if window.turns else lines
-    for turn in window.turns:
-        compact_lines.append(_turn_prompt_line(turn, max_chars=900))
+    compact_lines, quote_sources = _prompt_lines_with_turn_chars(
+        instruction_lines,
+        window,
+        max_chars=900,
+    )
     prompt = "\n".join(compact_lines)
     if estimate_tokens(prompt) <= max_prompt_tokens:
-        return prompt
+        return CIEPromptBundle(prompt=prompt, family=family, quote_sources=quote_sources)
     # Final guard: keep all turn ids/actors, but heavily clip contents. This is preferable to skipping.
-    minimal_lines = lines[:-len(window.turns)] if window.turns else lines
-    for turn in window.turns:
-        minimal_lines.append(_turn_prompt_line(turn, max_chars=420))
+    minimal_lines, quote_sources = _prompt_lines_with_turn_chars(
+        instruction_lines,
+        window,
+        max_chars=420,
+    )
     prompt = "\n".join(minimal_lines)
-    return prompt
+    return CIEPromptBundle(prompt=prompt, family=family, quote_sources=quote_sources)
+
+
+def render_cie_prompt(
+    window: CIEWindow,
+    *,
+    family: str,
+    max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS,
+    codebook: dict[str, Any] | None = None,
+) -> str:
+    return render_cie_prompt_bundle(
+        window,
+        family=family,
+        max_prompt_tokens=max_prompt_tokens,
+        codebook=codebook,
+    ).prompt
 
 
 def _normalize_confidence(value: Any) -> str:
@@ -338,9 +401,16 @@ def validate_cie_payload(
     *,
     family: str,
     codebook: dict[str, Any] | None = None,
+    quote_source_texts: Mapping[str, str] | None = None,
     max_records: int = 3,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     codebook = codebook or load_default_codebook()
+    source_turns_by_id = {str(turn_id): source for turn_id, source in source_turns.items()}
+    quote_sources_by_id = (
+        {str(turn_id): text for turn_id, text in quote_source_texts.items()}
+        if quote_source_texts is not None
+        else None
+    )
     allowed = allowed_codes_for_family(family, codebook)
     valid: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -383,14 +453,20 @@ def validate_cie_payload(
                 rejected.append(_reject("evidence_not_object", record))
                 break
             turn_id = item.get("turn_id")
+            turn_key = str(turn_id)
             quote = item.get("quote")
-            if turn_id not in source_turns:
+            if turn_key not in source_turns_by_id:
                 quote_ok = False
                 rejected.append(_reject("turn_id_not_found", record))
                 break
-            source = source_turns[turn_id]
+            source = source_turns_by_id[turn_key]
             actors.add(source.get("actor"))
-            if not isinstance(quote, str) or not quote or quote not in str(source.get("text") or ""):
+            quote_source = (
+                str(quote_sources_by_id[turn_key])
+                if quote_sources_by_id is not None and turn_key in quote_sources_by_id
+                else str(source.get("text") or "")
+            )
+            if not isinstance(quote, str) or not quote or quote not in quote_source:
                 quote_ok = False
                 rejected.append(_reject("quote_not_found", record))
                 break
@@ -404,7 +480,7 @@ def validate_cie_payload(
             if not MODEL_ROUTE_RE.search(route_text):
                 rejected.append(_reject("model_routing_without_named_route", record))
                 continue
-        if rel == "A" and not ({"leon", "system", "tool"} & actors):
+        if rel == "A" and not ({"leon", "system"} & actors):
             rejected.append(_reject("source_reliability_a_without_direct_source", record))
             continue
         clean = dict(record)
@@ -627,6 +703,7 @@ def run_cie_harness(
     max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS,
     timeout: int = 180,
     llm_max_tokens: int = 3072,
+    pass_strategy: str = "per_family",
     combined_pass: bool = False,
     resume: bool = True,
 ) -> CIERunSummary:
@@ -656,7 +733,8 @@ def run_cie_harness(
         )
         counters["windows_considered"] += len(windows)
         for window in windows:
-            families = ["all"] if combined_pass else families_for_window(window)
+            effective_pass_strategy = "combined" if combined_pass else pass_strategy
+            families = families_for_pass_strategy(window, effective_pass_strategy)
             if not families:
                 _insert_window_run(
                     conn,
@@ -674,12 +752,13 @@ def run_cie_harness(
                 if resume and _already_processed(conn, window.window_id, extractor_version, family):
                     counters["skipped_existing_runs"] += 1
                     continue
-                prompt = render_cie_prompt(
+                prompt_bundle = render_cie_prompt_bundle(
                     window,
                     family=family,
                     max_prompt_tokens=max_prompt_tokens,
                     codebook=codebook,
                 )
+                prompt = prompt_bundle.prompt
                 phash = _prompt_hash(prompt)
                 try:
                     try:
@@ -697,6 +776,7 @@ def run_cie_harness(
                         source_turns,
                         family=family,
                         codebook=codebook,
+                        quote_source_texts=prompt_bundle.quote_sources,
                     )
                     inserted = _insert_records(
                         conn,

@@ -123,6 +123,8 @@ def test_cli_xai_dry_run_requires_no_key_or_network_and_reports_plan(tmp_path, m
             str(db),
             "extract",
             "--use-llm",
+            "--run-purpose",
+            "provider-smoke",
             "--llm-provider",
             "xai",
             "--llm-max-sessions",
@@ -135,6 +137,9 @@ def test_cli_xai_dry_run_requires_no_key_or_network_and_reports_plan(tmp_path, m
     out = json.loads(capsys.readouterr().out)
     assert out["dry_run"] is True
     assert out["llm"]["planned_sessions"] == 1
+    assert out["llm"]["planned_provider_call_ceiling"] == 2
+    assert out["llm"]["quality_claim_allowed"] is False
+    assert out["llm"]["run_purpose"] == "provider-smoke"
     assert out["llm"]["provider"] == "xai"
     assert out["llm"]["model"] == "grok-4.3"
     assert out["llm"]["reasoning_effort"] == "low"
@@ -153,6 +158,8 @@ def test_cli_xai_reasoning_effort_override_is_reported_in_dry_run(tmp_path, monk
             str(db),
             "extract",
             "--use-llm",
+            "--run-purpose",
+            "provider-smoke",
             "--llm-provider",
             "xai",
             "--llm-reasoning-effort",
@@ -168,7 +175,19 @@ def test_cli_xai_reasoning_effort_override_is_reported_in_dry_run(tmp_path, monk
     assert out["llm"]["reasoning_effort"] == "high"
 
 
-def test_cli_xai_requires_confirm_live_and_call_ceiling(tmp_path, capsys):
+def test_cli_use_llm_requires_explicit_run_purpose(tmp_path, capsys):
+    db = tmp_path / "miner.db"
+    conn = connect(db)
+    init_db(conn)
+    _seed_session(conn, "s", [("agent", "Should I verify?", None)])
+
+    rc = cli_main(["--db", str(db), "extract", "--use-llm", "--llm-max-sessions", "1"])
+
+    assert rc == 2
+    assert "requires --run-purpose" in capsys.readouterr().out
+
+
+def test_cli_xai_requires_confirm_live_and_retry_aware_call_ceiling(tmp_path, capsys):
     db = tmp_path / "miner.db"
     conn = connect(db)
     init_db(conn)
@@ -180,6 +199,8 @@ def test_cli_xai_requires_confirm_live_and_call_ceiling(tmp_path, capsys):
             str(db),
             "extract",
             "--use-llm",
+            "--run-purpose",
+            "provider-smoke",
             "--llm-provider",
             "xai",
             "--llm-model",
@@ -198,6 +219,8 @@ def test_cli_xai_requires_confirm_live_and_call_ceiling(tmp_path, capsys):
             str(db),
             "extract",
             "--use-llm",
+            "--run-purpose",
+            "provider-smoke",
             "--llm-provider",
             "xai",
             "--llm-model",
@@ -217,6 +240,8 @@ def test_cli_xai_requires_confirm_live_and_call_ceiling(tmp_path, capsys):
             str(db),
             "extract",
             "--use-llm",
+            "--run-purpose",
+            "provider-smoke",
             "--llm-provider",
             "xai",
             "--llm-model",
@@ -225,12 +250,35 @@ def test_cli_xai_requires_confirm_live_and_call_ceiling(tmp_path, capsys):
             "1",
             "--confirm-live",
             "--max-model-calls",
-            "0",
+            "1",
         ]
     )
 
     assert rc == 2
-    assert "planned calls exceed" in capsys.readouterr().out
+    assert "planned provider calls exceed --max-model-calls (2 > 1)" in capsys.readouterr().out
+
+
+def test_cli_blocks_quality_or_production_claims_through_legacy_llm_path(tmp_path, capsys):
+    db = tmp_path / "miner.db"
+    conn = connect(db)
+    init_db(conn)
+    _seed_session(conn, "s", [("agent", "Should I verify?", None)])
+
+    rc = cli_main(
+        [
+            "--db",
+            str(db),
+            "extract",
+            "--use-llm",
+            "--run-purpose",
+            "extraction-quality",
+            "--llm-max-sessions",
+            "1",
+        ]
+    )
+
+    assert rc == 2
+    assert "legacy --use-llm path is provider-smoke only" in capsys.readouterr().out
 
 
 def test_cli_default_provider_remains_local(tmp_path, monkeypatch):
@@ -251,7 +299,18 @@ def test_cli_default_provider_remains_local(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli_module, "run_llm_extractors", fake_run_llm_extractors)
 
-    rc = cli_main(["--db", str(db), "extract", "--use-llm", "--llm-max-sessions", "1"])
+    rc = cli_main(
+        [
+            "--db",
+            str(db),
+            "extract",
+            "--use-llm",
+            "--run-purpose",
+            "provider-smoke",
+            "--llm-max-sessions",
+            "1",
+        ]
+    )
 
     assert rc == 0
     assert seen["base_url"] == "http://127.0.0.1:8080"

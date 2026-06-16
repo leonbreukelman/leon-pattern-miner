@@ -15,7 +15,7 @@ For extraction-quality or model-quality work, use the CIE/benchmark path:
 - `src/leon_pattern_miner/cie.py` — conversation windowing, CIE prompt rendering, quote/schema validation.
 - `src/leon_pattern_miner/cie_codebook.json` — canonical codes, definitions, few-shot examples, and near-misses.
 - `benchmark/cie-extraction-v0/` — public-safe benchmark fixture preserving the v0 scoring shape: 15 sessions, 287 turns, 51 reference findings.
-- `scripts/run_benchmark.py` — canonical runner for candidate models.
+- `scripts/run_benchmark.py` — canonical runner for candidate models, including explicit `--pass-strategy per_family|combined` and `--adapter xai` support.
 
 Because this GitHub repo is public, raw conversation-derived benchmark sessions are not checked in. Quality claims must use a private/sanitized CIE gold-set recall gate and report code-level recall, quote-strict recall, agreement-with-reference, per-bucket results, cost, latency, and caveats. Opus reference findings are a strong reference, not ground truth.
 
@@ -23,7 +23,7 @@ Because this GitHub repo is public, raw conversation-derived benchmark sessions 
 
 `miner extract --use-llm` currently routes through `src/leon_pattern_miner/llm_extractors.py`. Treat that as legacy pilot/provider-smoke scaffolding, not the canonical extraction-quality harness.
 
-That path selects/truncates keyword-matched candidate turns and uses a thin prompt. It is acceptable for narrow provider-mechanics checks — authentication, JSON envelope, masking, call budget, quote-validation plumbing — but not for deciding whether Grok/Qwen/DiffusionGemma or any other model is good at the north-star task.
+That path selects/truncates keyword-matched candidate turns and uses a thin prompt. The CLI enforces `--run-purpose provider-smoke` for `--use-llm`; quality or corpus-production purposes are blocked there. It is acceptable for narrow provider-mechanics checks — authentication, JSON envelope, masking, call budget, quote-validation plumbing — but not for deciding whether Grok/Qwen/DiffusionGemma or any other model is good at the north-star task.
 
 Before any model run, decide which question is being answered:
 

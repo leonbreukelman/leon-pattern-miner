@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -10,7 +11,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from leon_pattern_miner.adapters import AdapterConfig, diffusion_cli_preflight, get_adapter
-from leon_pattern_miner.benchmark import default_result_dir, load_dataset, run_candidate
+from leon_pattern_miner.benchmark import default_result_dir, estimate_candidate_prompt_count, load_dataset, run_candidate
+from leon_pattern_miner.llm import ProviderCallBudget, planned_provider_call_ceiling
+
+DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8080/v1"
 
 
 def _strip_v1(base_url: str) -> str:
@@ -18,9 +22,16 @@ def _strip_v1(base_url: str) -> str:
     return base[:-3] if base.endswith("/v1") else base
 
 
-def _preflight(base_url: str, timeout: int = 5) -> dict:
+def _preflight(base_url: str, timeout: int = 5, *, api_key_env: str | None = None) -> dict:
     root = _strip_v1(base_url)
-    with urllib.request.urlopen(f"{root}/v1/models", timeout=timeout) as resp:
+    headers = {}
+    if api_key_env:
+        api_key = os.environ.get(api_key_env)
+        if not api_key:
+            raise RuntimeError(f"missing API key env {api_key_env}")
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(f"{root}/v1/models", headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
@@ -30,9 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dataset", default="benchmark/cie-extraction-v0")
     parser.add_argument("--model", required=True, help="Candidate model label / endpoint model id")
-    parser.add_argument("--adapter", choices=["openai", "diffusion-cli"], default="openai")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8080/v1")
+    parser.add_argument("--adapter", choices=["openai", "diffusion-cli", "xai"], default="openai")
+    parser.add_argument("--base-url", default=DEFAULT_LOCAL_BASE_URL)
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--pass-strategy", choices=["per_family", "combined"], default="per_family")
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--max-window-tokens", type=int, default=None)
@@ -48,6 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diffusion-ctx", type=int, default=None)
     parser.add_argument("--diffusion-steps", type=int, default=None)
     parser.add_argument("--diffusion-extra-arg", action="append", default=[])
+    parser.add_argument("--xai-api-key-env", default="XAI_API_KEY")
+    parser.add_argument("--xai-reasoning-effort", choices=["none", "low", "medium", "high"], default="low")
+    parser.add_argument("--max-model-calls", type=int, default=None)
     parser.add_argument(
         "--no-preflight",
         action="store_true",
@@ -60,11 +75,39 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.runs < 1:
         raise SystemExit("--runs must be >= 1")
+    if args.adapter == "xai" and args.base_url == DEFAULT_LOCAL_BASE_URL:
+        args.base_url = "https://api.x.ai/v1"
 
     dataset = load_dataset(args.dataset)
     output_dir = Path(args.output_dir) if args.output_dir else default_result_dir(dataset, args.model)
+    provider_budget = None
+    if args.adapter == "xai":
+        planned_prompts = estimate_candidate_prompt_count(
+            dataset,
+            runs=args.runs,
+            max_window_tokens=args.max_window_tokens,
+            overlap_tokens=args.overlap_tokens,
+            pass_strategy=args.pass_strategy,
+        )
+        planned_calls = planned_provider_call_ceiling(planned_prompts)
+        if args.max_model_calls is None:
+            print(
+                f"ERROR: --adapter xai requires --max-model-calls; planned retry-aware ceiling is {planned_calls}",
+                file=sys.stderr,
+            )
+            return 2
+        if planned_calls > args.max_model_calls:
+            print(
+                f"ERROR: planned provider calls exceed --max-model-calls ({planned_calls} > {args.max_model_calls})",
+                file=sys.stderr,
+            )
+            return 2
+        provider_budget = ProviderCallBudget(max_calls=args.max_model_calls)
 
     cfg = AdapterConfig(
+        provider_budget=provider_budget,
+        xai_api_key_env=args.xai_api_key_env,
+        xai_reasoning_effort=args.xai_reasoning_effort,
         diffusion_bin=args.diffusion_bin,
         diffusion_model=args.diffusion_model,
         diffusion_prompt_mode=args.diffusion_prompt_mode,
@@ -76,11 +119,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     chat_func = get_adapter(args.adapter, cfg)
 
-    if not args.no_preflight and args.adapter == "openai":
+    if not args.no_preflight and args.adapter in {"openai", "xai"}:
         try:
-            models = _preflight(args.base_url)
+            models = _preflight(
+                args.base_url,
+                api_key_env=args.xai_api_key_env if args.adapter == "xai" else None,
+            )
         except Exception as exc:
-            print(f"ERROR: local model endpoint is not reachable at {args.base_url}: {exc}", file=sys.stderr)
+            label = "xAI" if args.adapter == "xai" else "local model"
+            print(f"ERROR: {label} endpoint is not reachable at {args.base_url}: {exc}", file=sys.stderr)
             return 2
         ids = [str(item.get("id")) for item in models.get("data", []) if isinstance(item, dict)]
         print("preflight: endpoint OK", ", ".join(ids[:5]) if ids else "(no model ids reported)")
@@ -112,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         max_prompt_tokens=args.max_prompt_tokens,
         timeout=args.timeout,
         llm_max_tokens=args.llm_max_tokens,
+        pass_strategy=args.pass_strategy,
         threshold=args.threshold,
         served_model_ids=ids,
     )

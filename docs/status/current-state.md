@@ -15,7 +15,7 @@ Use the CIE/benchmark path for extraction-quality decisions:
 1. `src/leon_pattern_miner/cie.py`
    - window conversations with overlap;
    - render CIE prompts with codebook cards, few-shots, near-misses, schema, and quote rules;
-   - validate exact quote evidence.
+   - validate exact quote evidence against the same prompt-visible cleaned/masked turn text the model saw.
 2. `src/leon_pattern_miner/cie_codebook.json`
    - source of truth for codes and examples.
 3. `benchmark/cie-extraction-v0/`
@@ -23,10 +23,14 @@ Use the CIE/benchmark path for extraction-quality decisions:
    - raw conversation-derived benchmark data stays local/ignored because the GitHub repo is public.
 4. `scripts/run_benchmark.py`
    - canonical candidate-model runner for quality comparison.
+   - supports explicit `--pass-strategy per_family|combined`; default is `per_family`, matching the corpus CIE harness.
+   - supports `--adapter xai` with authenticated `/v1/models` preflight and retry-aware `--max-model-calls` budgeting.
 
 ## Legacy path warning
 
 `miner extract --use-llm` uses `src/leon_pattern_miner/llm_extractors.py`, which selects/truncates candidate turns and uses a thin prompt. It is a legacy/pilot/provider-smoke path, not the canonical model-quality path.
+
+The CLI now enforces that boundary: any `--use-llm` run requires `--run-purpose provider-smoke`; `extraction-quality` and `corpus-production` are blocked through the legacy path. Remote legacy smoke runs are capped and use retry-aware provider call ceilings.
 
 Do not use that path to decide whether Grok, Qwen, DiffusionGemma, or any other frontier/local model is good at conversation intelligence extraction. Use it only for narrow provider-mechanics tests, and label results as such.
 
@@ -36,25 +40,30 @@ The xAI/Grok adapter work added provider mechanics to `miner extract --use-llm`.
 
 That sent Grok a regex-selected, truncated candidate-turn sketch instead of CIE windows with codebook/few-shots. The resulting record counts measure the legacy extractor path, not Grok's real usefulness for the north star.
 
-Corrective guardrails now added:
+Corrective guardrails now implemented in code:
 
-- `AGENTS.md` states the north star and forbids frontier-model quality evaluation through `llm_extractors.py`.
-- `README.md` points agents to the canonical CIE/benchmark path first.
-- Grok adapter status docs are marked provider-mechanics-only / not production-quality proof.
-- Raw Grok smoke/sample reports are marked provider-smoke-only at the top of each report so future agents do not cite their record counts as model-quality evidence.
+- CIE prompt rendering returns quote-source metadata; validation can verify quotes against prompt-visible cleaned/masked turn text.
+- Benchmark and corpus CIE share explicit pass strategy semantics; benchmark defaults to `per_family` instead of always `all`.
+- Standalone model-routing signals route into the authorization/model-routing CIE pass.
+- Tool-only evidence cannot justify `source_reliability=A`; use `D` for tool output.
+- Deterministic extractor IDs are versioned as `deterministic-v2` and include stream/pattern/actor/normalized summary/evidence so distinct patterns sharing a quote do not collide while template-like duplicates still dedupe.
+- Legacy `miner extract --use-llm` is code-enforced as provider-smoke-only with retry-aware remote provider budgeting.
+- xAI/Grok is wired into `scripts/run_benchmark.py` / `src/leon_pattern_miner/adapters.py`; use that path for CIE benchmark runs, not the legacy extractor.
 
 ## Current model/evaluation status
 
 - The public CIE benchmark fixture exists for harness/scorer regression. Actual model-quality claims require a private/sanitized CIE gold-set recall gate.
 - Private C0 Qwen-vs-Opus baseline: recall about 0.35, quote-strict about 0.29, agreement-with-Opus about 0.62. The public fixture preserves that score shape for regression only; Opus is a reference, not ground truth.
 - DiffusionGemma local runtime exists but did not emit a valid CIE JSON envelope on a real CIE window; do not run/report a full scorecard yet.
-- Grok 4.3 provider adapter mechanics are implemented, but the recent 50-session none/low/high reasoning results are legacy-harness results only. They should not be used to judge extraction quality or production readiness.
+- Grok 4.3 provider adapter mechanics and CIE benchmark adapter plumbing are implemented. The prior 50-session none/low/high reasoning results remain legacy-harness results only and should not be used to judge extraction quality or production readiness.
 
 ## Next safe step
 
-Wire xAI/Grok into the CIE benchmark runner path, then run Grok 4.3 against a private/sanitized CIE gold-set dataset with the same CIE prompt/windowing/validator/scorer used for Qwen and DiffusionGemma work. Use the public `benchmark/cie-extraction-v0/` fixture only for harness mechanics/regression.
+Run Grok 4.3 against a private/sanitized CIE gold-set dataset through `scripts/run_benchmark.py --adapter xai --pass-strategy per_family` with explicit `--max-model-calls`, cost/latency tracking, and Leon approval before any paid/off-machine prompt spend beyond a bounded smoke.
 
-Required report shape for that run:
+Use the public `benchmark/cie-extraction-v0/` fixture only for harness mechanics/regression unless/until a per-family public-safe fixture is generated.
+
+Required report shape for a real quality run:
 
 - model and reasoning mode;
 - exact benchmark command;

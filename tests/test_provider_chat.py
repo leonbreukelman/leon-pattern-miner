@@ -4,7 +4,13 @@ import urllib.error
 
 import pytest
 
-from leon_pattern_miner.llm import OpenAIProviderConfig, ProviderCallBudget, chat_json_provider
+from leon_pattern_miner.llm import (
+    MAX_PROVIDER_ATTEMPTS_PER_PROMPT,
+    OpenAIProviderConfig,
+    ProviderCallBudget,
+    chat_json_provider,
+    planned_provider_call_ceiling,
+)
 
 
 class FakeResponse:
@@ -213,6 +219,12 @@ def test_malformed_json_retries_once_when_budget_allows(monkeypatch):
     assert result["json"] == {"records": []}
     assert calls == 2
     assert budget.calls_made == 2
+
+
+def test_planned_provider_call_ceiling_matches_json_retry_attempts():
+    assert MAX_PROVIDER_ATTEMPTS_PER_PROMPT == 2
+    assert planned_provider_call_ceiling(0) == 0
+    assert planned_provider_call_ceiling(3) == 6
 
 
 def test_provider_call_budget_aggregates_response_usage(monkeypatch):

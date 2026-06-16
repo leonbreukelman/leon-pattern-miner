@@ -27,11 +27,10 @@ Evidence:
 
 Superseded production guidance:
 
-Do **not** proceed directly to a bounded production Grok corpus run from this status file. First wire xAI/Grok into the canonical CIE benchmark path. Use `benchmark/cie-extraction-v0/` only for public fixture/regression mechanics; use a private/sanitized CIE gold set for model-quality scoring.
+Do **not** proceed directly to a bounded production Grok corpus run from this status file. xAI/Grok is now wired into the canonical CIE benchmark path; the next quality step is to run that path against a private/sanitized CIE gold set. Use `benchmark/cie-extraction-v0/` only for public fixture/regression mechanics.
 
 Next valid Grok step:
 
-1. Add/verify an xAI adapter path for `scripts/run_benchmark.py` / `src/leon_pattern_miner/adapters.py`.
-2. Run Grok 4.3 on a private/sanitized CIE gold set using the CIE prompt/windowing/validator/scorer; use the checked-in public fixture only to prove the harness path.
-3. Report code-level recall, quote-strict recall, agreement-with-Opus, per-bucket results, cost, and latency.
-4. Only after that quality gate should Leon consider a paid/off-machine corpus run.
+1. Run Grok 4.3 on a private/sanitized CIE gold set with `scripts/run_benchmark.py --adapter xai --pass-strategy per_family` using explicit retry-aware `--max-model-calls`.
+2. Report code-level recall, quote-strict recall, agreement-with-Opus, per-bucket results, cost, and latency.
+3. Only after that quality gate should Leon consider a paid/off-machine corpus run.

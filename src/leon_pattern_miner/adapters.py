@@ -7,7 +7,7 @@ from pathlib import Path
 from shutil import which
 from typing import Any, Callable
 
-from .llm import chat_json, coerce_json_content
+from .llm import OpenAIProviderConfig, ProviderCallBudget, chat_json, chat_json_provider, coerce_json_content
 
 ChatFunc = Callable[..., dict[str, Any]]
 SubprocessRun = Callable[..., subprocess.CompletedProcess[str]]
@@ -16,6 +16,10 @@ SubprocessRun = Callable[..., subprocess.CompletedProcess[str]]
 @dataclass(frozen=True)
 class AdapterConfig:
     openai_chat_func: ChatFunc = chat_json
+    provider_chat_func: ChatFunc = chat_json_provider
+    provider_budget: ProviderCallBudget | None = None
+    xai_api_key_env: str = "XAI_API_KEY"
+    xai_reasoning_effort: str | None = "low"
     diffusion_bin: str = "llama-diffusion-cli"
     diffusion_model: str | None = None
     diffusion_prompt_mode: str = "file"  # stdin|file|arg
@@ -30,6 +34,33 @@ class AdapterConfig:
 
 def make_openai_adapter(cfg: AdapterConfig) -> ChatFunc:
     return cfg.openai_chat_func
+
+
+def make_xai_adapter(cfg: AdapterConfig) -> ChatFunc:
+    def chat(
+        prompt: str,
+        *,
+        base_url: str = "https://api.x.ai/v1",
+        timeout: int = 300,
+        max_tokens: int = 4096,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        config = OpenAIProviderConfig.xai(
+            model=model or "grok-4.3",
+            base_url=base_url,
+            api_key_env=cfg.xai_api_key_env,
+            reasoning_effort=cfg.xai_reasoning_effort,
+        )
+        return cfg.provider_chat_func(
+            prompt,
+            config=config,
+            timeout=timeout,
+            max_tokens=max_tokens,
+            model=model,
+            request_budget=cfg.provider_budget,
+        )
+
+    return chat
 
 
 def _resolve_executable(executable: str) -> str:
@@ -145,6 +176,7 @@ def make_diffusion_cli_adapter(cfg: AdapterConfig) -> ChatFunc:
 ADAPTERS: dict[str, Callable[[AdapterConfig], ChatFunc]] = {
     "openai": make_openai_adapter,
     "diffusion-cli": make_diffusion_cli_adapter,
+    "xai": make_xai_adapter,
 }
 
 

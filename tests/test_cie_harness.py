@@ -1,7 +1,9 @@
 from leon_pattern_miner.cie import (
     build_session_windows,
+    families_for_window,
     init_cie_tables,
     render_cie_prompt,
+    render_cie_prompt_bundle,
     run_cie_harness,
     validate_cie_payload,
 )
@@ -62,6 +64,59 @@ def test_prompt_uses_codebook_fewshots_and_stays_under_budget():
     assert "source_reliability" in prompt
     assert "Return strict JSON" in prompt
     assert len(prompt) // 4 <= 2200
+
+
+def test_prompt_bundle_validates_against_exact_displayed_quote_source():
+    raw_text = "Do not email leon@example.com.\n\nUse    Fable for the owner-facing review."
+    turns = [
+        {"turn_id": "s:0", "session_id": "s", "idx": 0, "actor": "leon", "text": raw_text, "tool_name": ""},
+    ]
+    window = build_session_windows(turns, max_window_tokens=1000)[0]
+
+    bundle = render_cie_prompt_bundle(window, family="authorization_limit", max_prompt_tokens=2200)
+
+    assert "leon@example.com" not in bundle.prompt
+    assert "[REDACTED_EMAIL_1]" in bundle.prompt
+    assert bundle.quote_sources["s:0"] == "Do not email [REDACTED_EMAIL_1]. Use Fable for the owner-facing review."
+    payload = {
+        "records": [
+            {
+                "codebook_code": "authorization_limit",
+                "unit": "turn",
+                "statement": "Leon forbids emailing the redacted address.",
+                "actor": "leon",
+                "source_reliability": "A",
+                "info_credibility": 1,
+                "evidence": [{"turn_id": "s:0", "quote": "Do not email [REDACTED_EMAIL_1]."}],
+                "assumptions": [],
+                "alternative_interpretations": [],
+                "disconfirming_evidence": [],
+                "falsifiers": [],
+                "confidence": "high",
+                "confidence_basis": "direct instruction",
+                "sensitivity": "internal",
+            }
+        ]
+    }
+
+    valid, rejected = validate_cie_payload(
+        payload,
+        {"s:0": turns[0]},
+        family="authorization_limit",
+        quote_source_texts=bundle.quote_sources,
+    )
+
+    assert len(valid) == 1
+    assert rejected == []
+
+
+def test_model_routing_signal_routes_to_authorization_pass_not_dead_family():
+    turns = [
+        {"turn_id": "s:0", "session_id": "s", "idx": 0, "actor": "leon", "text": "Use Fable for strategy.", "tool_name": ""},
+    ]
+    window = build_session_windows(turns, max_window_tokens=1000)[0]
+
+    assert families_for_window(window) == ["authorization_limit"]
 
 
 def test_validate_rejects_unverifiable_quotes_and_keeps_valid_records():
@@ -143,6 +198,44 @@ def test_validate_rejects_model_routing_without_named_model_or_routing_language(
     assert valid == []
     assert rejected[0]["reason"] == "model_routing_without_named_route"
 
+
+def test_validate_rejects_source_reliability_a_for_tool_only_evidence():
+    source_turns = {
+        "s:0": {"actor": "tool", "text": "ERROR: command failed\nexit_code: 1"},
+    }
+    base_record = {
+        "codebook_code": "verification_review",
+        "unit": "turn",
+        "statement": "The command failed during verification.",
+        "actor": "tool",
+        "info_credibility": 1,
+        "evidence": [{"turn_id": "s:0", "quote": "ERROR: command failed"}],
+        "assumptions": [],
+        "alternative_interpretations": [],
+        "disconfirming_evidence": [],
+        "falsifiers": [],
+        "confidence": "high",
+        "confidence_basis": "tool output",
+        "sensitivity": "internal",
+    }
+
+    valid, rejected = validate_cie_payload(
+        {"records": [dict(base_record, source_reliability="A")]},
+        source_turns,
+        family="verification_review",
+    )
+
+    assert valid == []
+    assert rejected[0]["reason"] == "source_reliability_a_without_direct_source"
+
+    valid, rejected = validate_cie_payload(
+        {"records": [dict(base_record, source_reliability="D")]},
+        source_turns,
+        family="verification_review",
+    )
+
+    assert len(valid) == 1
+    assert rejected == []
 
 
 def test_validate_caps_records_per_payload_to_prevent_code_spam():

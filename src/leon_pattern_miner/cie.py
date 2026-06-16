@@ -54,6 +54,10 @@ FAMILY_PATTERNS = {
         r"\b(qwen|opus|fable|grok|claude|sonnet|local model|4090|llama|thinking|no_think|model routing|ask fable|use fable|use opus)\b",
         re.I,
     ),
+    "outcome_attribution": re.compile(
+        r"\b(redo|redid|rework|wrong target|ambiguous|unclear|had to|caused|landed|shipped|merged|delivered|failed|didn'?t work|start over)\b",
+        re.I,
+    ),
 }
 
 MODEL_ROUTE_RE = re.compile(

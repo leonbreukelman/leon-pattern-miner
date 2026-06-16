@@ -65,6 +65,10 @@ MODEL_ROUTE_RE = re.compile(
     re.I,
 )
 
+OUTCOME_CODES = {"intent_stated", "delivery_result", "rework_cause"}
+DELIVERY_VALUES = {"landed", "partial", "rework", "failed", "unknown"}
+CAUSE_VALUES = {"leon_instruction", "agent", "tool", "environment", "none"}
+
 
 @dataclass(frozen=True)
 class CIEWindow:
@@ -483,6 +487,19 @@ def validate_cie_payload(
             )
             if not MODEL_ROUTE_RE.search(route_text):
                 rejected.append(_reject("model_routing_without_named_route", record))
+                continue
+        if code in OUTCOME_CODES:
+            facets = record.get("facets") or {}
+            delivery = facets.get("delivery")
+            cause = facets.get("cause")
+            if delivery not in DELIVERY_VALUES or cause not in CAUSE_VALUES:
+                rejected.append(_reject("outcome_facets_invalid", record))
+                continue
+            if code == "rework_cause" and (
+                delivery not in {"partial", "rework", "failed"}
+                or cause not in {"leon_instruction", "agent", "tool", "environment"}
+            ):
+                rejected.append(_reject("rework_cause_without_real_cause", record))
                 continue
         if rel == "A" and not ({"leon", "system"} & actors):
             rejected.append(_reject("source_reliability_a_without_direct_source", record))

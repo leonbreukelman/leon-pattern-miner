@@ -12,21 +12,23 @@ For model-quality or extraction-quality work, use the CIE/benchmark path:
 
 - `src/leon_pattern_miner/cie.py`
   - `build_session_windows()` covers conversation windows with overlap.
-  - `render_cie_prompt()` uses the codebook, few-shots, near-misses, schema, and quote rules.
-  - `validate_cie_payload()` verifies exact quote evidence and schema.
+  - `render_cie_prompt()` / `render_cie_prompt_bundle()` use the codebook, few-shots, near-misses, schema, and quote rules.
+  - `validate_cie_payload()` verifies exact quote evidence and schema against prompt-visible quote sources when provided.
 - `src/leon_pattern_miner/cie_codebook.json`
   - Canonical code definitions, positive examples, and negative/near-miss examples.
 - `benchmark/cie-extraction-v0/`
   - Public-safe fixture preserving the v0 scoring shape: 15 sessions, 287 turns, 51 reference findings.
   - Because this GitHub repo is public, raw conversation-derived benchmark sessions must stay local/ignored unless explicitly sanitized and approved.
 - `scripts/run_benchmark.py`
-  - Canonical runner for comparing candidate models against the public fixture or a private/sanitized CIE gold set.
+  - Canonical runner for comparing candidate models against the public fixture or a private/sanitized CIE gold set; supports explicit pass strategy and xAI adapter plumbing.
 
 Before claiming a model is good or bad at mining, run it through a private/sanitized CIE gold-set recall gate, not merely the public synthetic fixture. Report code-level recall, quote-strict recall, agreement-with-reference, per-bucket results, cost, latency, and caveats.
 
 ## Legacy/pilot extractor boundary
 
 `miner extract --use-llm` currently calls `src/leon_pattern_miner/llm_extractors.py`. Treat this as legacy/pilot/provider-smoke scaffolding unless a task explicitly says to work on that path.
+
+The CLI enforces this boundary: `--use-llm` requires `--run-purpose provider-smoke`; `extraction-quality` and `corpus-production` are blocked through that legacy path. Remote provider-smoke runs require explicit live confirmation and retry-aware model-call ceilings.
 
 It does not represent the canonical intelligence-extraction method because it:
 

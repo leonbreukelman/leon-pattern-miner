@@ -45,8 +45,10 @@ The private conversation-derived v0 data should stay under ignored local paths s
 
 ## How the benchmark works (canonical harness)
 A model is just a `chat_func`. For each frozen session: `build_session_windows` →
-`render_cie_prompt(family="all")` → candidate model (4090 `http://127.0.0.1:8080/v1`
-or any endpoint) → `validate_cie_payload` → score vs `gold/` with
+`render_cie_prompt_bundle()` using explicit `--pass-strategy per_family|combined`
+(default `per_family`, matching the corpus CIE harness) → candidate model (4090
+`http://127.0.0.1:8080/v1`, `--adapter xai`, or another registered adapter) →
+`validate_cie_payload` against prompt-visible quote sources → score vs `gold/` with
 `leon_pattern_miner.cie_recall.score_recall` (code-level + quote-strict). Output:
 predictions + a scorecard with Wilson CIs, per-bucket table, delta-vs-baseline, and
 PASS/FAIL vs threshold, averaged over `--runs 3` (the 4090 is not run-to-run

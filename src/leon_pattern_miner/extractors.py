@@ -15,6 +15,7 @@ class ExtractSummary:
 
 
 ALLOWED_SINKS = {"memory_candidate", "skill_candidate", "profile_candidate", "report_only", "quarantine", "discard"}
+DETERMINISTIC_EXTRACTOR_VERSION = "deterministic-v2"
 
 
 def _record_id(*parts: str) -> str:
@@ -40,6 +41,12 @@ def _normalized_evidence_key(evidence: list[dict[str, str]]) -> str:
     return _normalize_quote_for_dedupe(evidence[0]["quote"])
 
 
+def _normalized_summary_key(summary: str, evidence_key: str) -> str:
+    if evidence_key.startswith("template:"):
+        return evidence_key
+    return _normalize_quote_for_dedupe(summary)
+
+
 def _evidence_quote(text: str, *, max_chars: int = 520) -> str:
     text = text.strip()
     if len(text) <= max_chars:
@@ -60,7 +67,7 @@ def _insert_record(
     actor: str,
     quote_turns: list[sqlite3.Row],
     extractor: str = "deterministic",
-    extractor_version: str = "deterministic-v1",
+    extractor_version: str = DETERMINISTIC_EXTRACTOR_VERSION,
     scope: str = "session",
     confidence: float = 0.72,
     recommended_sink: str = "report_only",
@@ -86,7 +93,15 @@ def _insert_record(
         recommended_sink = "report_only"
     if sensitivity != "internal":
         summary = f"{stream}/{pattern_type} record with suppressed sensitive anchor"
-    rid = _record_id(_normalized_evidence_key(evidence))
+    evidence_key = _normalized_evidence_key(evidence)
+    rid = _record_id(
+        session_id,
+        stream,
+        pattern_type,
+        actor,
+        _normalized_summary_key(summary, evidence_key),
+        evidence_key,
+    )
     cur = conn.execute(
         """
         insert or ignore into records(
@@ -298,10 +313,12 @@ def run_deterministic_extractors(conn: sqlite3.Connection) -> ExtractSummary:
         """
         update work_items
         set status='completed', finished_at=coalesce(finished_at, datetime('now'))
-        where extractor_version='deterministic-v1'
+        where extractor_version in ('deterministic-v1', ?)
           and status in ('pending', 'running')
           and session_id in (select session_id from sessions where status in ('extracted', 'verified'))
         """
+        ,
+        (DETERMINISTIC_EXTRACTOR_VERSION,),
     )
     conn.commit()
     return ExtractSummary(records_created=created)

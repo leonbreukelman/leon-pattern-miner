@@ -11,6 +11,12 @@ from typing import Any
 from .sensitivity import mask_sensitive
 
 DEFAULT_LLM_MODEL_ID = "unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M"
+MAX_PROVIDER_ATTEMPTS_PER_PROMPT = 2
+
+
+def planned_provider_call_ceiling(prompt_count: int) -> int:
+    """Worst-case provider requests for prompts when invalid JSON gets one retry."""
+    return max(0, int(prompt_count)) * MAX_PROVIDER_ATTEMPTS_PER_PROMPT
 
 
 @dataclass(frozen=True)
@@ -242,7 +248,7 @@ def chat_json_provider(
     api_key = _api_key(config)
     last_parse_error: Exception | None = None
     total_masked_hits = 0
-    for attempt in range(2):
+    for attempt in range(MAX_PROVIDER_ATTEMPTS_PER_PROMPT):
         retry_suffix = (
             ""
             if attempt == 0

@@ -7,14 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from .db import connect, init_db
-from .extractors import run_deterministic_extractors
+from .extractors import DETERMINISTIC_EXTRACTOR_VERSION, run_deterministic_extractors
 from .ingest import ingest_hermes_state_db, ingest_path
-from .llm import LLMHealth, OpenAIProviderConfig, ProviderCallBudget, chat_json_provider, health as llm_health
+from .llm import LLMHealth, OpenAIProviderConfig, ProviderCallBudget, chat_json_provider, health as llm_health, planned_provider_call_ceiling
 from .llm_extractors import DEFAULT_LLM_EXTRACTOR_VERSION, planned_llm_sessions, run_llm_extractors
 from .report import write_pilot_report
 from .runner import approve_pilot, enqueue_work, reset_stale_running_work, status_snapshot
 
 DEFAULT_DB = Path("runtime/miner.db")
+LEGACY_LLM_REMOTE_SMOKE_MAX_SESSIONS = 5
 
 
 def _conn(path: Path):
@@ -99,6 +100,13 @@ def cmd_extract(args: argparse.Namespace) -> int:
     args.effective_llm_model = args.llm_model or ("grok-4.3" if args.llm_provider == "xai" else None)
     args.effective_llm_reasoning_effort = args.llm_reasoning_effort if args.llm_provider == "xai" else None
     planned_sessions = _planned_llm_count(conn, args) if args.use_llm else 0
+    planned_provider_calls = planned_provider_call_ceiling(planned_sessions)
+    if args.use_llm and args.run_purpose is None:
+        print("BLOCKED: legacy --use-llm path requires --run-purpose provider-smoke")
+        return 2
+    if args.use_llm and args.run_purpose != "provider-smoke":
+        print("BLOCKED: legacy --use-llm path is provider-smoke only; use CIE benchmark/gold-set for quality or corpus runs")
+        return 2
     if args.use_llm and args.dry_run:
         print(
             json.dumps(
@@ -110,7 +118,10 @@ def cmd_extract(args: argparse.Namespace) -> int:
                         "model": args.effective_llm_model,
                         "reasoning_effort": args.effective_llm_reasoning_effort,
                         "extractor_version": args.llm_extractor_version,
+                        "run_purpose": args.run_purpose,
+                        "quality_claim_allowed": False,
                         "planned_sessions": planned_sessions,
+                        "planned_provider_call_ceiling": planned_provider_calls,
                         "max_model_calls": args.max_model_calls,
                     },
                 },
@@ -122,12 +133,19 @@ def cmd_extract(args: argparse.Namespace) -> int:
         if not args.confirm_live:
             print("BLOCKED: non-local LLM provider requires --confirm-live")
             return 2
+        if planned_sessions > LEGACY_LLM_REMOTE_SMOKE_MAX_SESSIONS:
+            print(
+                "BLOCKED: remote legacy provider-smoke runs are capped at "
+                f"{LEGACY_LLM_REMOTE_SMOKE_MAX_SESSIONS} sessions ({planned_sessions} planned)"
+            )
+            return 2
         if args.max_model_calls is None:
             print("BLOCKED: non-local LLM provider requires --max-model-calls")
             return 2
-        if planned_sessions > args.max_model_calls:
+        if planned_provider_calls > args.max_model_calls:
             print(
-                f"BLOCKED: planned calls exceed --max-model-calls ({planned_sessions} > {args.max_model_calls})"
+                "BLOCKED: planned provider calls exceed --max-model-calls "
+                f"({planned_provider_calls} > {args.max_model_calls})"
             )
             return 2
         if not os.environ.get(args.llm_api_key_env):
@@ -139,7 +157,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
             print("BLOCKED: full-corpus extraction requires approved 20-session pilot")
             return 2
     reset = reset_stale_running_work(conn, older_than_minutes=args.stale_minutes)
-    queued = enqueue_work(conn, extractor_version="deterministic-v1")
+    queued = enqueue_work(conn, extractor_version=DETERMINISTIC_EXTRACTOR_VERSION)
     summary = run_deterministic_extractors(conn)
     output: dict[str, object] = {"stale_reset": reset, "queued": queued, "records_created": summary.records_created}
     if args.use_llm:
@@ -174,10 +192,13 @@ def cmd_extract(args: argparse.Namespace) -> int:
             "model": args.effective_llm_model,
             "reasoning_effort": args.effective_llm_reasoning_effort,
             "extractor_version": args.llm_extractor_version,
+            "run_purpose": args.run_purpose,
+            "quality_claim_allowed": False,
             "sessions_processed": llm_summary.sessions_processed,
             "records_created": llm_summary.records_created,
             "errors": llm_summary.errors,
             "planned_sessions": planned_sessions,
+            "planned_provider_call_ceiling": planned_provider_calls,
         }
         if budget is not None:
             output["llm"]["model_calls_made"] = budget.calls_made
@@ -240,6 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--full-corpus", action="store_true")
     extract.add_argument("--stale-minutes", type=int, default=30)
     extract.add_argument("--use-llm", action="store_true")
+    extract.add_argument("--run-purpose", choices=["provider-smoke", "extraction-quality", "corpus-production"], default=None)
     extract.add_argument("--llm-url", default="http://127.0.0.1:8080")
     extract.add_argument("--llm-provider", choices=["local-openai", "xai"], default="local-openai")
     extract.add_argument("--llm-model", default=None)

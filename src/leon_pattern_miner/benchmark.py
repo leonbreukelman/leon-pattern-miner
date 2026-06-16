@@ -12,7 +12,8 @@ from typing import Any, Callable, Mapping
 from .cie import (
     DEFAULT_MAX_PROMPT_TOKENS,
     build_session_windows,
-    render_cie_prompt,
+    families_for_pass_strategy,
+    render_cie_prompt_bundle,
     validate_cie_payload,
 )
 from .cie_recall import Record, score_recall
@@ -195,6 +196,53 @@ def score_baseline(dataset: BenchmarkDataset) -> dict[str, Any]:
     return score_predictions(dataset, dataset.baseline)
 
 
+def _resolved_window_params(
+    dataset: BenchmarkDataset,
+    *,
+    max_window_tokens: int | None = None,
+    overlap_tokens: int | None = None,
+) -> tuple[int, int]:
+    window_params = dataset.manifest.get("window_params", {})
+    return (
+        int(max_window_tokens or window_params.get("max_window_tokens", 3500)),
+        int(overlap_tokens if overlap_tokens is not None else window_params.get("overlap_tokens", 600)),
+    )
+
+
+def estimate_candidate_prompt_count(
+    dataset: BenchmarkDataset,
+    *,
+    runs: int = 1,
+    max_window_tokens: int | None = None,
+    overlap_tokens: int | None = None,
+    pass_strategy: str = "per_family",
+) -> int:
+    """Estimate benchmark prompt count for budget gates before live provider calls."""
+    if pass_strategy not in {"per_family", "combined"}:
+        raise ValueError("pass_strategy must be 'per_family' or 'combined'")
+    max_window_tokens, overlap_tokens = _resolved_window_params(
+        dataset,
+        max_window_tokens=max_window_tokens,
+        overlap_tokens=overlap_tokens,
+    )
+    prompts = 0
+    for session_payload in dataset.sessions.values():
+        session_id = str(session_payload.get("session_id") or "")
+        turns = []
+        for raw_turn in session_payload.get("turns", []):
+            turn = dict(raw_turn)
+            if session_id and "session_id" not in turn:
+                turn["session_id"] = session_id
+            turns.append(turn)
+        for window in build_session_windows(
+            turns,
+            max_window_tokens=max_window_tokens,
+            overlap_tokens=overlap_tokens,
+        ):
+            prompts += len(families_for_pass_strategy(window, pass_strategy))
+    return prompts * max(0, int(runs))
+
+
 def wilson_ci(successes: int, total: int, z: float = 1.96) -> tuple[float, float]:
     if total <= 0:
         return (0.0, 0.0)
@@ -208,13 +256,6 @@ def wilson_ci(successes: int, total: int, z: float = 1.96) -> tuple[float, float
 def _safe_name(value: str) -> str:
     value = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
     return value.strip("-") or "model"
-
-
-def _normalise_local_base_url(base_url: str) -> str:
-    base = base_url.rstrip("/")
-    if base.endswith("/v1"):
-        return base[:-3]
-    return base
 
 
 def _record_for_output(record: dict[str, Any], *, window_id: str, family: str) -> dict[str, Any]:
@@ -235,7 +276,8 @@ def _extract_session_predictions(
     max_prompt_tokens: int,
     timeout: int,
     llm_max_tokens: int,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    pass_strategy: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     session_id = str(session_payload.get("session_id") or "")
     turns = []
     for raw_turn in session_payload.get("turns", []):
@@ -250,30 +292,48 @@ def _extract_session_predictions(
         overlap_tokens=overlap_tokens,
     )
     records: list[dict[str, Any]] = []
-    stats: dict[str, Any] = {"windows": len(windows), "records_rejected": 0, "errors": 0}
+    stats: dict[str, Any] = {
+        "windows": len(windows),
+        "records_rejected": 0,
+        "errors": 0,
+        "pass_strategy": pass_strategy,
+        "window_passes": 0,
+        "no_signal_windows": 0,
+    }
     for window in windows:
-        prompt = render_cie_prompt(window, family="all", max_prompt_tokens=max_prompt_tokens)
-        try:
-            response = chat_func(
-                prompt,
-                base_url=_normalise_local_base_url(base_url),
-                timeout=timeout,
-                max_tokens=llm_max_tokens,
-                model=model_name,
-            )
-            payload = response.get("json", response)
-            response_model_ids = response.get("model_ids")
-            if isinstance(response_model_ids, list):
-                stats.setdefault("model_ids", [])
-                stats["model_ids"].extend(str(model_id) for model_id in response_model_ids)
-            valid, rejected = validate_cie_payload(payload, source_turns, family="all")
-            stats["records_rejected"] += len(rejected)
-            records.extend(
-                _record_for_output(record, window_id=window.window_id, family="all")
-                for record in valid
-            )
-        except Exception:
-            stats["errors"] += 1
+        families = families_for_pass_strategy(window, pass_strategy)
+        if not families:
+            stats["no_signal_windows"] += 1
+            continue
+        for family in families:
+            stats["window_passes"] += 1
+            prompt_bundle = render_cie_prompt_bundle(window, family=family, max_prompt_tokens=max_prompt_tokens)
+            try:
+                response = chat_func(
+                    prompt_bundle.prompt,
+                    base_url=base_url,
+                    timeout=timeout,
+                    max_tokens=llm_max_tokens,
+                    model=model_name,
+                )
+                payload = response.get("json", response)
+                response_model_ids = response.get("model_ids")
+                if isinstance(response_model_ids, list):
+                    stats.setdefault("model_ids", [])
+                    stats["model_ids"].extend(str(model_id) for model_id in response_model_ids)
+                valid, rejected = validate_cie_payload(
+                    payload,
+                    source_turns,
+                    family=family,
+                    quote_source_texts=prompt_bundle.quote_sources,
+                )
+                stats["records_rejected"] += len(rejected)
+                records.extend(
+                    _record_for_output(record, window_id=window.window_id, family=family)
+                    for record in valid
+                )
+            except Exception:
+                stats["errors"] += 1
     return records, stats
 
 
@@ -301,7 +361,7 @@ def _transport_stats(session_stats: Mapping[str, Any]) -> dict[str, Any]:
     for stats in session_stats.values():
         if not isinstance(stats, Mapping):
             continue
-        windows += int(stats.get("windows") or 0)
+        windows += int(stats.get("window_passes") or stats.get("windows") or 0)
         errors += int(stats.get("errors") or 0)
         rejected += int(stats.get("records_rejected") or 0)
     valid_json_windows = max(0, windows - errors)
@@ -345,16 +405,21 @@ def run_candidate(
     max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS,
     timeout: int = 300,
     llm_max_tokens: int = 4096,
+    pass_strategy: str = "per_family",
     threshold: float | None = None,
     served_model_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run a candidate model over frozen sessions and write predictions + scorecards."""
+    if pass_strategy not in {"per_family", "combined"}:
+        raise ValueError("pass_strategy must be 'per_family' or 'combined'")
     output_root = Path(output_dir)
     integrity = assert_dataset_integrity(dataset)
     output_root.mkdir(parents=True, exist_ok=True)
-    window_params = dataset.manifest.get("window_params", {})
-    max_window_tokens = int(max_window_tokens or window_params.get("max_window_tokens", 3500))
-    overlap_tokens = int(overlap_tokens if overlap_tokens is not None else window_params.get("overlap_tokens", 600))
+    max_window_tokens, overlap_tokens = _resolved_window_params(
+        dataset,
+        max_window_tokens=max_window_tokens,
+        overlap_tokens=overlap_tokens,
+    )
 
     run_scores: list[dict[str, Any]] = []
     run_details: list[dict[str, Any]] = []
@@ -375,6 +440,7 @@ def run_candidate(
                 max_prompt_tokens=max_prompt_tokens,
                 timeout=timeout,
                 llm_max_tokens=llm_max_tokens,
+                pass_strategy=pass_strategy,
             )
             stem = dataset.file_by_session.get(session_id, session_id.replace(":", "__"))
             (pred_dir / f"{stem}.json").write_text(
@@ -419,6 +485,7 @@ def run_candidate(
             "overlap_tokens": overlap_tokens,
             "max_prompt_tokens": max_prompt_tokens,
             "llm_max_tokens": llm_max_tokens,
+            "pass_strategy": pass_strategy,
         },
         "threshold": threshold,
         "baseline": score_baseline(dataset),
@@ -470,6 +537,7 @@ def _render_scorecard(result: Mapping[str, Any]) -> str:
         "## Summary over runs",
         f"- served model ids observed: {', '.join(result.get('served_model_ids') or ['(not recorded)'])}",
         f"- runs: {result['runs_requested']}",
+        f"- pass strategy: {result.get('window_params', {}).get('pass_strategy', 'unknown')}",
         f"- recall mean ± sd: {_fmt_rate(result['summary']['recall']['mean'])} ± {_fmt_rate(result['summary']['recall']['sd'])}",
         f"- quote-strict recall mean ± sd: {_fmt_rate(result['summary']['quote_strict_recall']['mean'])} ± {_fmt_rate(result['summary']['quote_strict_recall']['sd'])}",
         f"- agreement-with-Opus mean ± sd: {_fmt_rate(result['summary']['agreement_with_opus']['mean'])} ± {_fmt_rate(result['summary']['agreement_with_opus']['sd'])}",

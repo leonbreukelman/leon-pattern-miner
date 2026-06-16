@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from leon_pattern_miner.benchmark import (
+    estimate_candidate_prompt_count,
     integrity_report,
     load_dataset,
     run_candidate,
@@ -93,14 +94,18 @@ def test_run_candidate_with_fake_chat_writes_predictions_and_scorecard(tmp_path)
     (root / "baseline_qwen" / "s1.json").write_text(json.dumps({"session_id": "s1", "extractor": "baseline", "records": []}))
 
     seen = {}
+    seen_prompts = []
 
     def fake_chat(prompt, *, base_url="http://unused", timeout=1, max_tokens=100, model=None):
         assert "turn_id=s1:0" in prompt
+        seen_prompts.append(prompt)
         seen["model"] = model
+        seen["base_url"] = base_url
         return {"json": {"records": [gold_record]}, "model_ids": ["fake-model"]}
 
+    dataset = load_dataset(root)
     result = run_candidate(
-        load_dataset(root),
+        dataset,
         output_dir=tmp_path / "results",
         model_name="fake-model",
         chat_func=fake_chat,
@@ -112,8 +117,14 @@ def test_run_candidate_with_fake_chat_writes_predictions_and_scorecard(tmp_path)
     )
 
     assert seen["model"] == "fake-model"
+    assert seen["base_url"] == "http://unused/v1"
+    assert len(seen_prompts) >= 1
+    assert any("Extraction family: authorization_limit" in prompt for prompt in seen_prompts)
+    assert all("Extraction family: all" not in prompt for prompt in seen_prompts)
+    assert estimate_candidate_prompt_count(dataset, runs=1, pass_strategy="per_family") == len(seen_prompts)
     assert result["model"] == "fake-model"
     assert result["served_model_ids"] == ["fake-model"]
+    assert result["window_params"]["pass_strategy"] == "per_family"
     assert result["runs"][0]["code_level"]["recall"] == 1.0
     assert result["runs"][0]["code_level"]["agreement_with_opus"] == 1.0
     assert result["recall_pass"] is True
@@ -141,7 +152,7 @@ def test_run_candidate_scorecard_surfaces_transport_failures(tmp_path):
             }
         )
     )
-    turns = [{"turn_id": "s1:0", "session_id": "s1", "idx": 0, "actor": "leon", "text": "hello", "tool_name": ""}]
+    turns = [{"turn_id": "s1:0", "session_id": "s1", "idx": 0, "actor": "leon", "text": "please verify this", "tool_name": ""}]
     (root / "sessions" / "s1.json").write_text(json.dumps({"session_id": "s1", "bucket": "short", "turns": turns}))
     (root / "gold" / "s1.json").write_text(json.dumps({"session_id": "s1", "extractor": "gold", "records": []}))
     (root / "baseline_qwen" / "s1.json").write_text(json.dumps({"session_id": "s1", "extractor": "baseline", "records": []}))
@@ -223,3 +234,5 @@ def test_run_benchmark_cli_help_smoke():
     assert "--dataset" in proc.stdout
     assert "--runs" in proc.stdout
     assert "--base-url" in proc.stdout
+    assert "--pass-strategy" in proc.stdout
+    assert "xai" in proc.stdout

@@ -2,8 +2,8 @@ import subprocess
 
 import pytest
 
-from leon_pattern_miner.adapters import AdapterConfig, get_adapter, make_diffusion_cli_adapter, make_openai_adapter
-from leon_pattern_miner.llm import coerce_json_content
+from leon_pattern_miner.adapters import AdapterConfig, get_adapter, make_diffusion_cli_adapter, make_openai_adapter, make_xai_adapter
+from leon_pattern_miner.llm import ProviderCallBudget, coerce_json_content
 
 
 def test_coerce_json_content_salvages_common_llm_wrappers():
@@ -16,7 +16,7 @@ def test_coerce_json_content_salvages_common_llm_wrappers():
 
 
 def test_get_adapter_lists_known_names_on_unknown_adapter():
-    with pytest.raises(ValueError, match="openai.*diffusion-cli"):
+    with pytest.raises(ValueError, match="openai.*diffusion-cli.*xai"):
         get_adapter("missing", AdapterConfig())
 
 
@@ -32,6 +32,64 @@ def test_openai_adapter_forwards_runner_kwargs():
     chat = make_openai_adapter(AdapterConfig(openai_chat_func=fake_chat))
     assert chat("PROMPT", base_url="http://x", timeout=7, max_tokens=11, model="m") == {"json": {"records": []}}
     assert seen == {"prompt": "PROMPT", "base_url": "http://x", "timeout": 7, "max_tokens": 11, "model": "m"}
+
+
+def test_xai_adapter_builds_provider_config_and_uses_shared_budget():
+    seen = {}
+    budget = ProviderCallBudget(max_calls=2)
+
+    def fake_provider_chat(prompt, *, config, timeout, max_tokens, model, request_budget):
+        seen.update(
+            {
+                "prompt": prompt,
+                "provider": config.provider_name,
+                "base_url": config.base_url,
+                "api_key_env": config.api_key_env,
+                "reasoning_effort": config.reasoning_effort,
+                "timeout": timeout,
+                "max_tokens": max_tokens,
+                "model": model,
+                "budget": request_budget,
+            }
+        )
+        return {"json": {"records": []}, "model_ids": [model]}
+
+    chat = make_xai_adapter(
+        AdapterConfig(
+            provider_chat_func=fake_provider_chat,
+            provider_budget=budget,
+            xai_api_key_env="TEST_XAI_KEY",
+            xai_reasoning_effort="high",
+        )
+    )
+
+    result = chat("PROMPT", base_url="https://api.x.ai/v1", timeout=7, max_tokens=11, model="grok-4.3")
+
+    assert result == {"json": {"records": []}, "model_ids": ["grok-4.3"]}
+    assert seen == {
+        "prompt": "PROMPT",
+        "provider": "xai",
+        "base_url": "https://api.x.ai/v1",
+        "api_key_env": "TEST_XAI_KEY",
+        "reasoning_effort": "high",
+        "timeout": 7,
+        "max_tokens": 11,
+        "model": "grok-4.3",
+        "budget": budget,
+    }
+
+
+def test_xai_adapter_default_base_url_uses_versioned_api_root():
+    seen = {}
+
+    def fake_provider_chat(prompt, *, config, timeout, max_tokens, model, request_budget):
+        seen["base_url"] = config.base_url
+        return {"json": {"records": []}}
+
+    chat = make_xai_adapter(AdapterConfig(provider_chat_func=fake_provider_chat))
+    chat("PROMPT", timeout=1, max_tokens=1, model="grok-4.3")
+
+    assert seen["base_url"] == "https://api.x.ai/v1"
 
 
 def test_diffusion_cli_adapter_uses_noninteractive_file_prompt_and_returns_contract(tmp_path):

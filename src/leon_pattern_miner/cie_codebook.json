@@ -128,6 +128,60 @@
         "session",
         "arc"
       ]
+    },
+    {
+      "code": "intent_stated",
+      "family": "outcome_attribution",
+      "definition": "The stated or inferable goal for an arc or session, including the user's target outcome or acceptance intent.",
+      "includes": [
+        "explicit goal statements",
+        "clear target outcomes for a work arc",
+        "inferable intent from paired request/context"
+      ],
+      "excludes": [
+        "outcomes without any stated/inferable intent",
+        "generic status updates without a goal"
+      ],
+      "unit": [
+        "arc",
+        "session"
+      ]
+    },
+    {
+      "code": "delivery_result",
+      "family": "outcome_attribution",
+      "definition": "Whether the work matched the stated/inferable intent: landed, partial, rework, failed, or unknown.",
+      "includes": [
+        "landed or shipped work",
+        "partial or failed delivery",
+        "rework needed because the work missed intent"
+      ],
+      "excludes": [
+        "unverified outcome claims not present in the transcript",
+        "status with no connection to an intent"
+      ],
+      "unit": [
+        "arc",
+        "session"
+      ]
+    },
+    {
+      "code": "rework_cause",
+      "family": "outcome_attribution",
+      "definition": "Attributed cause of a shortfall, rework, partial delivery, or failure; cause may be leon_instruction, agent, tool, or environment.",
+      "includes": [
+        "Leon-caused ambiguity or contradictory instruction",
+        "agent mistakes requiring rework",
+        "tool or environment failures causing partial/failed delivery"
+      ],
+      "excludes": [
+        "successful landed work with no shortfall",
+        "speculation about cause without transcript evidence"
+      ],
+      "unit": [
+        "arc",
+        "session"
+      ]
     }
   ],
   "few_shots": [
@@ -346,6 +400,106 @@
       "statement": "Clean success report (PR merged, CI green); no failure occurred and nothing was recovered.",
       "why": "Near-miss: distinguishes a success/status report from genuine failure_recovery; prevents tagging routine green runs.",
       "negative_or_near_miss": true
+    },
+    {
+      "source_family": "outcome_attribution",
+      "codebook_code": "intent_stated",
+      "unit": "arc",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "facets": {
+        "delivery": "unknown",
+        "cause": "none"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:intent:0",
+          "quote": "build the fixture reader and prove it with tests"
+        }
+      ],
+      "statement": "Leon states the intended outcome for the arc: build a fixture reader and verify it with tests.",
+      "why": "Positive synthetic example: clear intent exists before any delivery result is claimed.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "outcome_attribution",
+      "codebook_code": "delivery_result",
+      "unit": "arc",
+      "source_reliability": "C",
+      "info_credibility": 3,
+      "facets": {
+        "delivery": "landed",
+        "cause": "none"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:landed:2",
+          "quote": "The fixture reader shipped and merged with tests green."
+        }
+      ],
+      "statement": "The fixture reader work landed successfully relative to the stated intent.",
+      "why": "Positive synthetic example: transcript contains an outcome claim, so delivery_result may be emitted.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "outcome_attribution",
+      "codebook_code": "rework_cause",
+      "unit": "arc",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "facets": {
+        "delivery": "rework",
+        "cause": "leon_instruction"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:leon-cause:1",
+          "quote": "the spec I gave was ambiguous so you built the wrong target and had to redo it"
+        }
+      ],
+      "statement": "Leon attributes wrong-target work and rework to ambiguity in his own instruction.",
+      "why": "Positive synthetic example: cause can be leon_instruction when the transcript directly supports it.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "outcome_attribution",
+      "codebook_code": "none",
+      "unit": "arc",
+      "source_reliability": "A",
+      "info_credibility": 6,
+      "facets": {
+        "delivery": "unknown",
+        "cause": "none"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:near-miss-intent:0",
+          "quote": "what happened with that thing from earlier?"
+        }
+      ],
+      "statement": "Intent is not stated or inferable with enough evidence; emit no outcome record.",
+      "why": "Negative near-miss: outcome_attribution must not invent an intent when the transcript lacks a concrete target.",
+      "negative_or_near_miss": true
+    },
+    {
+      "source_family": "outcome_attribution",
+      "codebook_code": "none",
+      "unit": "arc",
+      "source_reliability": "C",
+      "info_credibility": 6,
+      "facets": {
+        "delivery": "unknown",
+        "cause": "none"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:near-miss-outcome:1",
+          "quote": "I will start the fixture reader next."
+        }
+      ],
+      "statement": "Outcome is not present in the transcript; future-tense intent/status alone is not delivery_result.",
+      "why": "Negative near-miss: do not fabricate delivery_result or rework_cause when only a planned action exists.",
+      "negative_or_near_miss": true
     }
   ],
   "passes": [
@@ -379,6 +533,15 @@
         "methodology_workflow"
       ],
       "notes": "Target durable selection/sequencing rules, not per-run narration."
+    },
+    {
+      "family": "outcome_attribution",
+      "codes": [
+        "intent_stated",
+        "delivery_result",
+        "rework_cause"
+      ],
+      "notes": "Arc/session outcome and cause attribution; cause may be leon_instruction."
     }
   ],
   "prompt_rules": [

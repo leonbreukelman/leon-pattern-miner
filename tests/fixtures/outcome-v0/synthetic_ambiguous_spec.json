@@ -1,0 +1,33 @@
+{
+  "session_id": "synthetic:ambiguous-spec",
+  "turns": [
+    {
+      "session_id": "synthetic:ambiguous-spec",
+      "turn_id": "synthetic:ambiguous-spec:0",
+      "idx": 0,
+      "actor": "leon",
+      "text": "the spec I gave was ambiguous so you built the wrong target and had to redo it"
+    },
+    {
+      "session_id": "synthetic:ambiguous-spec",
+      "turn_id": "synthetic:ambiguous-spec:1",
+      "idx": 1,
+      "actor": "agent",
+      "text": "I redid the implementation against the corrected target and delivered the replacement patch."
+    }
+  ],
+  "expected_records": [
+    {
+      "codebook_code": "rework_cause",
+      "unit": "arc",
+      "statement": "Ambiguous Leon spec caused wrong-target work and rework.",
+      "actor": "leon",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "facets": {"delivery": "rework", "cause": "leon_instruction"},
+      "evidence": [{"turn_id": "synthetic:ambiguous-spec:0", "quote": "the spec I gave was ambiguous"}],
+      "confidence": "high",
+      "sensitivity": "internal"
+    }
+  ]
+}

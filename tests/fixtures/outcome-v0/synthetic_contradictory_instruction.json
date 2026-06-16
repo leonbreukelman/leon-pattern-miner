@@ -1,0 +1,33 @@
+{
+  "session_id": "synthetic:contradictory-instruction",
+  "turns": [
+    {
+      "session_id": "synthetic:contradictory-instruction",
+      "turn_id": "synthetic:contradictory-instruction:0",
+      "idx": 0,
+      "actor": "leon",
+      "text": "I told you to keep the old route and replace it, that contradictory instruction caused the failed build and rework"
+    },
+    {
+      "session_id": "synthetic:contradictory-instruction",
+      "turn_id": "synthetic:contradictory-instruction:1",
+      "idx": 1,
+      "actor": "agent",
+      "text": "The first patch did not work because those directions conflicted, so I started over."
+    }
+  ],
+  "expected_records": [
+    {
+      "codebook_code": "rework_cause",
+      "unit": "arc",
+      "statement": "Contradictory Leon instruction caused a failed build and rework.",
+      "actor": "leon",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "facets": {"delivery": "failed", "cause": "leon_instruction"},
+      "evidence": [{"turn_id": "synthetic:contradictory-instruction:0", "quote": "contradictory instruction caused the failed build"}],
+      "confidence": "high",
+      "sensitivity": "internal"
+    }
+  ]
+}

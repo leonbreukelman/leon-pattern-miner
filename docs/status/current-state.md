@@ -57,6 +57,10 @@ Corrective guardrails now implemented in code:
 - DiffusionGemma local runtime exists but did not emit a valid CIE JSON envelope on a real CIE window; do not run/report a full scorecard yet.
 - Grok 4.3 provider adapter mechanics and CIE benchmark adapter plumbing are implemented. The prior 50-session none/low/high reasoning results remain legacy-harness results only and should not be used to judge extraction quality or production readiness.
 
+## Outcome attribution extension
+
+`outcome_attribution` is a new additive CIE family for arc/session-level intent → delivery → cause records. It measures stated intent, whether delivery landed/was partial/needed rework/failed, and the attributed cause of shortfalls. The cause facet can explicitly name `leon_instruction` when the transcript supports that Leon's ambiguous or contradictory instruction caused rework or failure. Current status: implemented behind synthetic tests only; no live model calls, private transcript data, or production corpus runs have been performed.
+
 ## Next safe step
 
 Run Grok 4.3 against a private/sanitized CIE gold-set dataset through `scripts/run_benchmark.py --adapter xai --pass-strategy per_family` with explicit `--max-model-calls`, cost/latency tracking, and Leon approval before any paid/off-machine prompt spend beyond a bounded smoke.

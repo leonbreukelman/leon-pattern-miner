@@ -1,0 +1,33 @@
+{
+  "session_id": "synthetic:landed",
+  "turns": [
+    {
+      "session_id": "synthetic:landed",
+      "turn_id": "synthetic:landed:0",
+      "idx": 0,
+      "actor": "leon",
+      "text": "build the fixture reader"
+    },
+    {
+      "session_id": "synthetic:landed",
+      "turn_id": "synthetic:landed:1",
+      "idx": 1,
+      "actor": "agent",
+      "text": "The fixture reader shipped and merged with tests green."
+    }
+  ],
+  "expected_records": [
+    {
+      "codebook_code": "delivery_result",
+      "unit": "arc",
+      "statement": "Fixture reader work landed successfully.",
+      "actor": "agent",
+      "source_reliability": "C",
+      "info_credibility": 3,
+      "facets": {"delivery": "landed", "cause": "none"},
+      "evidence": [{"turn_id": "synthetic:landed:1", "quote": "shipped and merged"}],
+      "confidence": "medium",
+      "sensitivity": "internal"
+    }
+  ]
+}

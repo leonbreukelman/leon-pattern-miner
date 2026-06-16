@@ -109,7 +109,7 @@ Python adapter call returned:
 
 ### Real CIE window smoke
 
-Frozen session/window: `hermes:20260503_233818_858ef1`.
+Frozen session/window: `synthetic:diffusiongemma_window_01`.
 
 - All-GPU `-n 512` and `-n 768`: OOM.
 - `--cpu-moe -n 768`: fits and runs on CUDA0, but output remains in thought channel and does not emit a valid `records` envelope.

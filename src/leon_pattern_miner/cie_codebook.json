@@ -193,11 +193,11 @@
       "info_credibility": 1,
       "evidence": [
         {
-          "turn_id": "hermes:20260609_225509_ff73c0:13",
-          "quote": "that was the wrong kanban, i was refering to the hermes kanban"
+          "turn_id": "synthetic:fs_correction_preference_01:0",
+          "quote": "that was the wrong checklist, I meant the release checklist"
         }
       ],
-      "statement": "Leon corrects the agent for acting on the wrong target (wrong Kanban board) and redirects to the Hermes board.",
+      "statement": "Leon corrects the agent for acting on the wrong target and redirects it to the intended project board.",
       "why": "Clean explicit correction marker (\"that was the wrong\"); first-person user evidence; canonical recall anchor for the family.",
       "negative_or_near_miss": false
     },
@@ -209,11 +209,11 @@
       "info_credibility": 1,
       "evidence": [
         {
-          "turn_id": "hermes:20260610_131740_5138aa:31",
-          "quote": "consice and without technical jargon, that would fit into my context window"
+          "turn_id": "synthetic:fs_correction_preference_02:0",
+          "quote": "concise and without technical jargon, short enough to fit in my context window"
         }
       ],
-      "statement": "Leon wants status reports concise, jargon-free, and sized to fit his context window.",
+      "statement": "Leon wants status reports short, plain-language, and sized to fit his working context.",
       "why": "Durable stylistic/communication preference stated directly; distinguishes correction-of-content from preference-of-form.",
       "negative_or_near_miss": false
     },
@@ -225,11 +225,11 @@
       "info_credibility": 1,
       "evidence": [
         {
-          "turn_id": "hermes:20260610_064459_f6e5b2:0",
-          "quote": "Do not edit files or post to GitHub."
+          "turn_id": "synthetic:fs_correction_preference_03:0",
+          "quote": "Do not edit files or post to the tracker."
         }
       ],
-      "statement": "Leon scopes the session as read-only: review only, no file edits and no GitHub posting.",
+      "statement": "Leon scopes the session as read-only: review only, no file edits and no posting to an external tracker.",
       "why": "Cross-family example (lives under correction_preference but codes as authorization_limit); explicit scope ceiling set at session open.",
       "negative_or_near_miss": false
     },
@@ -241,11 +241,11 @@
       "info_credibility": 1,
       "evidence": [
         {
-          "turn_id": "hermes:20260610_111220_541d99:8",
-          "quote": "check and confirm it is safe to reboot"
+          "turn_id": "synthetic:fs_authorization_limit_01:0",
+          "quote": "check and confirm it is safe to reboot this test machine"
         },
         {
-          "turn_id": "hermes:20260610_111220_541d99:9",
+          "turn_id": "synthetic:fs_authorization_limit_01:1",
           "quote": "BLOCKED (hardline): system shutdown/reboot."
         }
       ],
@@ -261,11 +261,11 @@
       "info_credibility": 1,
       "evidence": [
         {
-          "turn_id": "hermes:20260609_192509_527484:20",
+          "turn_id": "synthetic:fs_correction_preference_04:0",
           "quote": "do not send it, save it in drafts"
         }
       ],
-      "statement": "Leon authorizes drafting an outbound email but forbids sending it; it must be saved as a draft.",
+      "statement": "Leon authorizes drafting an outbound message but forbids sending it; it must be saved as a draft.",
       "why": "Explicit outbound-action limit; useful near-boundary case where family label differs from code (prevents mislabeling as plain correction).",
       "negative_or_near_miss": false
     },
@@ -277,8 +277,8 @@
       "info_credibility": 1,
       "evidence": [
         {
-          "turn_id": "hermes:20260609_225509_ff73c0:21",
-          "quote": "unblock this and start working on them, when you need a decision or do not know or have low confidence ask fable"
+          "turn_id": "synthetic:fs_authorization_limit_02:0",
+          "quote": "unblock this and start working; when you need a decision or have low confidence ask fable"
         }
       ],
       "statement": "Leon grants autonomy to unblock and execute, with an escalation rule to consult Fable on low-confidence decisions.",
@@ -293,7 +293,7 @@
       "info_credibility": 1,
       "evidence": [
         {
-          "turn_id": "hermes:20260609_222957_c4017c:0",
+          "turn_id": "synthetic:fs_authorization_limit_03:0",
           "quote": "use fable to review this project"
         }
       ],
@@ -309,7 +309,7 @@
       "info_credibility": 6,
       "evidence": [
         {
-          "turn_id": "hermes:cron_836d512f8dc9_20260609_123223:2",
+          "turn_id": "synthetic:fs_model_routing_01:0",
           "quote": "[SILENT]"
         }
       ],
@@ -325,8 +325,8 @@
       "info_credibility": 2,
       "evidence": [
         {
-          "turn_id": "hermes:cron_f66b0f341dc7_20260504_100655:0",
-          "quote": "spec compliance must pass before quality rev"
+          "turn_id": "synthetic:fs_verification_review_01:0",
+          "quote": "spec compliance must pass before quality review starts"
         }
       ],
       "statement": "Review workflow gates on spec compliance before any quality/security review can run.",
@@ -341,12 +341,12 @@
       "info_credibility": 2,
       "evidence": [
         {
-          "turn_id": "hermes:cron_f66b0f341dc7_20260504_100655:0",
-          "quote": "so I stopped at the spec/revision gate and did"
+          "turn_id": "synthetic:fs_failure_recovery_01:0",
+          "quote": "so I stopped at the spec/revision gate and did not continue"
         }
       ],
       "statement": "On a failed review (REQUEST_CHANGES) the agent halted at the gate and did not proceed downstream.",
-      "why": "Failure-detection-then-halt behavior; same source as the verification example shows one window yielding two distinct codes.",
+      "why": "Failure-detection-then-halt behavior; same synthetic source shape as the verification example shows one window yielding two distinct codes.",
       "negative_or_near_miss": false
     },
     {
@@ -357,16 +357,16 @@
       "info_credibility": 2,
       "evidence": [
         {
-          "turn_id": "hermes:cron_f66b0f341dc7_20260504_011403:0",
-          "quote": "because filesystem inspection showed"
+          "turn_id": "synthetic:fs_methodology_workflow_01:0",
+          "quote": "because filesystem inspection showed the next pending phase"
         },
         {
-          "turn_id": "hermes:cron_f66b0f341dc7_20260504_011403:0",
-          "quote": "The primary plan lists Phase 5.1 as the next substantive incomplete task."
+          "turn_id": "synthetic:fs_methodology_workflow_01:1",
+          "quote": "The active plan lists Phase 2 as the next incomplete task."
         }
       ],
       "statement": "Recurring evidence-grounded task-selection workflow: inspect filesystem/status artifacts, then select the next plan-recommended phase.",
-      "why": "Captures the stable autonomous-run methodology (artifact-driven next-task selection) seen repeatedly across cron sessions.",
+      "why": "Captures the stable autonomous-run methodology (artifact-driven next-task selection) using fabricated teaching evidence.",
       "negative_or_near_miss": false
     },
     {
@@ -377,8 +377,8 @@
       "info_credibility": 6,
       "evidence": [
         {
-          "turn_id": "hermes:20260610_115800_f5dfd9:0",
-          "quote": "the patterns I am looking for is the questions I keep asking, the directions I keep giving"
+          "turn_id": "synthetic:fs_correction_preference_05:0",
+          "quote": "I want recurring themes from my questions and directions, not one-off task notes"
         }
       ],
       "statement": "Initial open-ended request describing the mining goal; no correction event present.",
@@ -393,8 +393,8 @@
       "info_credibility": 2,
       "evidence": [
         {
-          "turn_id": "hermes:cron_f1a3a4d5e24c_20260503_210311:0",
-          "quote": "No failed jobs to report."
+          "turn_id": "synthetic:fs_failure_recovery_02:0",
+          "quote": "No broken runs to report."
         }
       ],
       "statement": "Clean success report (PR merged, CI green); no failure occurred and nothing was recovered.",

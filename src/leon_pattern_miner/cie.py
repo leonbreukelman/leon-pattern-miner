@@ -501,6 +501,12 @@ def validate_cie_payload(
             ):
                 rejected.append(_reject("rework_cause_without_real_cause", record))
                 continue
+            if code == "intent_stated" and (delivery != "unknown" or cause != "none"):
+                rejected.append(_reject("outcome_facets_invalid", record))
+                continue
+            if code == "delivery_result" and delivery in {"landed", "unknown"} and cause != "none":
+                rejected.append(_reject("outcome_facets_invalid", record))
+                continue
         if rel == "A" and not ({"leon", "system"} & actors):
             rejected.append(_reject("source_reliability_a_without_direct_source", record))
             continue

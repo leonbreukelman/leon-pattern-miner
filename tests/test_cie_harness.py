@@ -295,3 +295,35 @@ def test_runner_marks_zero_record_windows_processed(tmp_path):
     row = conn.execute("select status, records_created from cie_window_runs").fetchone()
     assert row["status"] == "processed"
     assert row["records_created"] == 0
+
+
+
+def test_validate_rejects_landed_delivery_with_shortfall_cause():
+    source_turns = {
+        "s:0": {
+            "turn_id": "s:0",
+            "actor": "agent",
+            "text": "the work shipped and merged with tests green",
+        }
+    }
+    payload = {
+        "records": [
+            {
+                "codebook_code": "delivery_result",
+                "unit": "arc",
+                "statement": "Synthetic landed work should not name a shortfall cause.",
+                "actor": "agent",
+                "source_reliability": "C",
+                "info_credibility": 3,
+                "facets": {"delivery": "landed", "cause": "leon_instruction"},
+                "evidence": [{"turn_id": "s:0", "quote": "shipped and merged"}],
+                "confidence": "medium",
+                "sensitivity": "internal",
+            }
+        ]
+    }
+
+    valid, rejected = validate_cie_payload(payload, source_turns, family="outcome_attribution")
+
+    assert not valid
+    assert rejected[0]["reason"] == "outcome_facets_invalid"

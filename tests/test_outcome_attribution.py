@@ -103,76 +103,13 @@ def test_end_to_end_pipeline_runs_on_synthetic_fixture():
 def _stub_extract(bundle, win):
     # Implement: return a {"records":[...]} payload whose evidence quotes are exact substrings of
     # bundle.quote_sources, mirroring the engineered fixture (>=1 leon_instruction rework). No model call.
-    templates = {
-        "synthetic:ambiguous-spec": {
-            "codebook_code": "rework_cause",
-            "unit": "arc",
-            "statement": "Ambiguous Leon spec caused wrong-target work and rework.",
-            "actor": "leon",
-            "source_reliability": "A",
-            "info_credibility": 1,
-            "facets": {"delivery": "rework", "cause": "leon_instruction"},
-            "turn_id": "synthetic:ambiguous-spec:0",
-            "quote": "the spec I gave was ambiguous",
-        },
-        "synthetic:contradictory-instruction": {
-            "codebook_code": "rework_cause",
-            "unit": "arc",
-            "statement": "Contradictory Leon instruction caused a failed build and rework.",
-            "actor": "leon",
-            "source_reliability": "A",
-            "info_credibility": 1,
-            "facets": {"delivery": "failed", "cause": "leon_instruction"},
-            "turn_id": "synthetic:contradictory-instruction:0",
-            "quote": "contradictory instruction caused the failed build",
-        },
-        "synthetic:agent-bug": {
-            "codebook_code": "rework_cause",
-            "unit": "arc",
-            "statement": "Agent-introduced bug caused parser-fix rework.",
-            "actor": "agent",
-            "source_reliability": "C",
-            "info_credibility": 3,
-            "facets": {"delivery": "rework", "cause": "agent"},
-            "turn_id": "synthetic:agent-bug:1",
-            "quote": "I introduced a bug",
-        },
-        "synthetic:tool-failure": {
-            "codebook_code": "rework_cause",
-            "unit": "arc",
-            "statement": "Environment/tool timeout caused partial migration delivery.",
-            "actor": "tool",
-            "source_reliability": "D",
-            "info_credibility": 3,
-            "facets": {"delivery": "partial", "cause": "environment"},
-            "turn_id": "synthetic:tool-failure:1",
-            "quote": "database connection timed out",
-        },
-        "synthetic:landed": {
-            "codebook_code": "delivery_result",
-            "unit": "arc",
-            "statement": "Fixture reader work landed successfully.",
-            "actor": "agent",
-            "source_reliability": "C",
-            "info_credibility": 3,
-            "facets": {"delivery": "landed", "cause": "none"},
-            "turn_id": "synthetic:landed:1",
-            "quote": "shipped and merged",
-        },
-    }
-    template = templates.get(win.session_id)
-    if not template:
-        return {"records": []}
-    turn_id = template["turn_id"]
-    quote = template["quote"]
-    if quote not in bundle.quote_sources.get(turn_id, ""):
-        return {"records": []}
-    record = {k: v for k, v in template.items() if k not in {"turn_id", "quote"}}
-    record.update(
-        {
-            "evidence": [{"turn_id": turn_id, "quote": quote}],
-            "confidence": "high" if record["source_reliability"] == "A" else "medium",
-            "sensitivity": "internal",
-        }
-    )
-    return {"records": [record]}
+    for path in glob.glob("tests/fixtures/outcome-v0/*.json"):
+        sess = json.load(open(path))
+        if sess.get("session_id") != win.session_id:
+            continue
+        records = []
+        for record in sess.get("expected_records", []):
+            if all(item["quote"] in bundle.quote_sources.get(str(item["turn_id"]), "") for item in record["evidence"]):
+                records.append(record)
+        return {"records": records}
+    return {"records": []}

@@ -5,13 +5,17 @@ import os
 import re
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .sensitivity import mask_sensitive
 
 DEFAULT_LLM_MODEL_ID = "unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M"
 MAX_PROVIDER_ATTEMPTS_PER_PROMPT = 2
+TICKS_PER_USD = 10_000_000_000
+_XAI_PRICE_PER_MILLION = {
+    "grok-4.3": {"input": 1.25, "output": 2.50},
+}
 
 
 def planned_provider_call_ceiling(prompt_count: int) -> int:
@@ -75,44 +79,181 @@ class OpenAIProviderConfig:
         )
 
 
+class ProviderBudgetExceeded(RuntimeError):
+    """Provider call or dollar budget was exhausted before another request."""
+
+
 @dataclass
 class ProviderCallBudget:
     max_calls: int
+    cost_cap_usd: float | None = None
+    cost_estimate_model: str | None = None
+    max_usage_samples: int = 25
     calls_made: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
     reasoning_tokens: int = 0
+    cached_tokens: int = 0
     total_tokens: int = 0
+    cost_in_usd_ticks: int = 0
+    calls_priced: int = 0
+    samples: list[dict[str, Any]] = field(default_factory=list)
+    samples_truncated: int = 0
+    cost_cap_breached: bool = False
 
     def consume(self) -> None:
+        cap_cost = self.effective_cost_usd(model=self.cost_estimate_model)
+        if self.cost_cap_usd is not None and cap_cost is not None and cap_cost >= self.cost_cap_usd:
+            self.cost_cap_breached = True
+            raise ProviderBudgetExceeded(
+                f"model dollar cost cap exhausted before provider request (${cap_cost:.6f} >= ${self.cost_cap_usd:.6f})"
+            )
         if self.calls_made >= self.max_calls:
-            raise RuntimeError(
+            raise ProviderBudgetExceeded(
                 f"model call budget exhausted before provider request ({self.calls_made}/{self.max_calls})"
             )
         self.calls_made += 1
 
-    def record_usage(self, usage: dict[str, int] | None) -> None:
+    def record_usage(
+        self,
+        usage: dict[str, Any] | None,
+        *,
+        json_parse_ok: bool | None = None,
+        attempt: int | None = None,
+        http_status: int = 200,
+    ) -> None:
         if not usage:
             return
         self.prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
         self.completion_tokens += int(usage.get("completion_tokens", 0) or 0)
         self.reasoning_tokens += int(usage.get("reasoning_tokens", 0) or 0)
+        self.cached_tokens += int(usage.get("cached_tokens", 0) or 0)
         self.total_tokens += int(usage.get("total_tokens", 0) or 0)
+        if usage.get("cost_ticks_present") and usage.get("cost_in_usd_ticks") is not None:
+            self.cost_in_usd_ticks += int(usage.get("cost_in_usd_ticks") or 0)
+            self.calls_priced += 1
+        sample = {
+            "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+            "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+            "reasoning_tokens": int(usage.get("reasoning_tokens", 0) or 0),
+            "cached_tokens": int(usage.get("cached_tokens", 0) or 0),
+            "total_tokens": int(usage.get("total_tokens", 0) or 0),
+            "cost_in_usd_ticks": usage.get("cost_in_usd_ticks"),
+            "cost_ticks_present": bool(usage.get("cost_ticks_present")),
+            "http_status": http_status,
+            "json_parse_ok": json_parse_ok,
+            "attempt": attempt,
+        }
+        if len(self.samples) < self.max_usage_samples:
+            self.samples.append(sample)
+        else:
+            self.samples_truncated += 1
+        cap_cost = self.effective_cost_usd(model=self.cost_estimate_model)
+        if self.cost_cap_usd is not None and cap_cost is not None and cap_cost >= self.cost_cap_usd:
+            self.cost_cap_breached = True
+
+    @property
+    def calls_unpriced(self) -> int:
+        return max(0, self.calls_made - self.calls_priced)
+
+    def exact_cost_usd(self) -> float | None:
+        if self.calls_priced <= 0:
+            return None
+        return self.cost_in_usd_ticks / TICKS_PER_USD
+
+    def estimated_cost_usd(self, *, model: str | None = None) -> float | None:
+        model_id = model or self.cost_estimate_model or ""
+        prices = _XAI_PRICE_PER_MILLION.get(model_id)
+        if not prices or not (self.prompt_tokens or self.completion_tokens or self.reasoning_tokens):
+            return None
+        output_billable = max(
+            self.completion_tokens + self.reasoning_tokens,
+            self.total_tokens - self.prompt_tokens,
+        )
+        return (self.prompt_tokens * prices["input"] + output_billable * prices["output"]) / 1_000_000
+
+    def effective_cost_usd(self, *, model: str | None = None) -> float | None:
+        costs = [
+            cost
+            for cost in (self.exact_cost_usd(), self.estimated_cost_usd(model=model))
+            if cost is not None
+        ]
+        return max(costs) if costs else None
+
+    def summary(
+        self,
+        *,
+        provider: str,
+        model: str,
+        reasoning_effort: str | None = None,
+        cost_cap_usd: float | None = None,
+    ) -> dict[str, Any]:
+        exact_cost = self.exact_cost_usd()
+        estimated_cost = self.estimated_cost_usd(model=model)
+        if self.calls_made <= 0:
+            cost_source = "unavailable"
+        elif self.calls_priced == self.calls_made:
+            cost_source = "exact"
+        elif self.calls_priced > 0:
+            cost_source = "partial"
+        elif estimated_cost is not None:
+            cost_source = "estimated"
+        else:
+            cost_source = "unavailable"
+        cap = self.cost_cap_usd if cost_cap_usd is None else cost_cap_usd
+        cap_cost = self.effective_cost_usd(model=model)
+        cap_breached = self.cost_cap_breached or (
+            cap is not None and cap_cost is not None and cap_cost >= cap
+        )
+        return {
+            "provider": provider,
+            "model": model,
+            "reasoning_effort": reasoning_effort,
+            "max_model_calls": self.max_calls,
+            "calls_made": self.calls_made,
+            "calls_priced": self.calls_priced,
+            "calls_unpriced": self.calls_unpriced,
+            "tokens": {
+                "prompt": self.prompt_tokens,
+                "completion": self.completion_tokens,
+                "reasoning": self.reasoning_tokens,
+                "cached": self.cached_tokens,
+                "total": self.total_tokens,
+            },
+            "cost": {
+                "cost_in_usd_ticks": self.cost_in_usd_ticks,
+                "cost_usd": exact_cost if exact_cost is not None else estimated_cost,
+                "estimated_cost_usd": estimated_cost,
+                "cost_source": cost_source,
+                "ticks_per_usd": TICKS_PER_USD,
+            },
+            "cost_cap_usd": cap,
+            "cost_cap_breached": cap_breached,
+            "samples": list(self.samples),
+            "samples_truncated": self.samples_truncated,
+        }
 
 
-def _normalise_usage(raw_usage: Any) -> dict[str, int] | None:
+def _normalise_usage(raw_usage: Any) -> dict[str, Any] | None:
     if not isinstance(raw_usage, dict):
         return None
     prompt_tokens = int(raw_usage.get("prompt_tokens", raw_usage.get("input_tokens", 0)) or 0)
     completion_tokens = int(raw_usage.get("completion_tokens", raw_usage.get("output_tokens", 0)) or 0)
+    prompt_details = raw_usage.get("prompt_tokens_details") or raw_usage.get("input_tokens_details") or {}
     completion_details = raw_usage.get("completion_tokens_details") or raw_usage.get("output_tokens_details") or {}
-    reasoning_tokens = 0
+    cached_tokens = 0
+    if isinstance(prompt_details, dict):
+        cached_tokens = int(prompt_details.get("cached_tokens", 0) or 0)
+    reasoning_tokens = int(raw_usage.get("reasoning_tokens", 0) or 0)
     if isinstance(completion_details, dict):
-        reasoning_tokens = int(completion_details.get("reasoning_tokens", 0) or 0)
+        reasoning_tokens = int(completion_details.get("reasoning_tokens", reasoning_tokens) or 0)
     total_tokens = int(raw_usage.get("total_tokens", 0) or 0)
     if total_tokens == 0 and (prompt_tokens or completion_tokens):
         total_tokens = prompt_tokens + completion_tokens + reasoning_tokens
-    if not (prompt_tokens or completion_tokens or reasoning_tokens or total_tokens):
+    cost_raw = raw_usage.get("cost_in_usd_ticks")
+    cost_ticks_present = cost_raw is not None
+    cost_ticks = int(cost_raw) if cost_ticks_present else None
+    if not (prompt_tokens or completion_tokens or reasoning_tokens or cached_tokens or total_tokens or cost_ticks_present):
         return None
     if reasoning_tokens == 0 and total_tokens > prompt_tokens + completion_tokens:
         reasoning_tokens = total_tokens - prompt_tokens - completion_tokens
@@ -120,7 +261,10 @@ def _normalise_usage(raw_usage: Any) -> dict[str, int] | None:
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "reasoning_tokens": reasoning_tokens,
+        "cached_tokens": cached_tokens,
         "total_tokens": total_tokens,
+        "cost_in_usd_ticks": cost_ticks,
+        "cost_ticks_present": cost_ticks_present,
     }
 
 
@@ -294,23 +438,30 @@ def chat_json_provider(
         except urllib.error.URLError as exc:
             raise RuntimeError(f"LLM transport error: {_redact_error(str(exc), api_key=api_key)}") from exc
         usage = _normalise_usage(raw.get("usage"))
-        if request_budget is not None:
-            request_budget.record_usage(usage)
-        content, served_model = _visible_content(raw)
         try:
-            result = {
-                "json": _parse_json_content(content),
-                "masked_hits": total_masked_hits,
-                "model_ids": [served_model or payload["model"]],
-            }
-            if usage is not None:
-                result["usage"] = usage
-            return result
+            content, served_model = _visible_content(raw)
+            parsed = _parse_json_content(content)
         except (json.JSONDecodeError, ValueError) as exc:
+            if request_budget is not None:
+                request_budget.record_usage(usage, json_parse_ok=False, attempt=attempt + 1)
             last_parse_error = exc
             if attempt == 0:
                 continue
             raise
+        except Exception:
+            if request_budget is not None:
+                request_budget.record_usage(usage, json_parse_ok=False, attempt=attempt + 1)
+            raise
+        if request_budget is not None:
+            request_budget.record_usage(usage, json_parse_ok=True, attempt=attempt + 1)
+        result = {
+            "json": parsed,
+            "masked_hits": total_masked_hits,
+            "model_ids": [served_model or payload["model"]],
+        }
+        if usage is not None:
+            result["usage"] = usage
+        return result
     if last_parse_error is not None:
         raise last_parse_error
     raise RuntimeError("LLM JSON parsing failed without an error")

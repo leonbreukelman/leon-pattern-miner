@@ -35,6 +35,34 @@ def _preflight(base_url: str, timeout: int = 5, *, api_key_env: str | None = Non
         return json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
+def _unquote_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _load_env_file(path: str | Path) -> list[str]:
+    """Load simple KEY=VALUE entries without overriding existing environment."""
+    env_path = Path(path)
+    if not env_path.exists():
+        return []
+    loaded: list[str] = []
+    for raw_line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = _unquote_env_value(value)
+        loaded.append(key)
+    return loaded
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run MinerMark: score a CIE extraction model against frozen Opus gold."
@@ -63,6 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--xai-api-key-env", default="XAI_API_KEY")
     parser.add_argument("--xai-reasoning-effort", choices=["none", "low", "medium", "high"], default="low")
     parser.add_argument("--max-model-calls", type=int, default=None)
+    parser.add_argument("--cost-cap-usd", type=float, default=None)
+    parser.add_argument(
+        "--env-file",
+        default=".env",
+        help="Repo-local env file to load without overriding exported env vars.",
+    )
     parser.add_argument(
         "--no-preflight",
         action="store_true",
@@ -77,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--runs must be >= 1")
     if args.adapter == "xai" and args.base_url == DEFAULT_LOCAL_BASE_URL:
         args.base_url = "https://api.x.ai/v1"
+    if args.adapter == "xai":
+        _load_env_file(args.env_file)
 
     dataset = load_dataset(args.dataset)
     output_dir = Path(args.output_dir) if args.output_dir else default_result_dir(dataset, args.model)
@@ -102,7 +138,11 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        provider_budget = ProviderCallBudget(max_calls=args.max_model_calls)
+        provider_budget = ProviderCallBudget(
+            max_calls=args.max_model_calls,
+            cost_cap_usd=args.cost_cap_usd,
+            cost_estimate_model=args.model,
+        )
 
     cfg = AdapterConfig(
         provider_budget=provider_budget,
@@ -147,6 +187,18 @@ def main(argv: list[str] | None = None) -> int:
     else:
         ids = []
 
+    provider_usage_func = None
+    if provider_budget is not None:
+        def _provider_usage() -> dict:
+            return provider_budget.summary(
+                provider="xai",
+                model=args.model,
+                reasoning_effort=args.xai_reasoning_effort,
+                cost_cap_usd=args.cost_cap_usd,
+            )
+
+        provider_usage_func = _provider_usage
+
     result = run_candidate(
         dataset,
         output_dir=output_dir,
@@ -162,8 +214,12 @@ def main(argv: list[str] | None = None) -> int:
         pass_strategy=args.pass_strategy,
         threshold=args.threshold,
         served_model_ids=ids,
+        provider_usage=provider_usage_func,
     )
-    print(json.dumps({"scorecard": str(output_dir / "scorecard.md"), "summary": result["summary"]}, indent=2))
+    out = {"scorecard": str(output_dir / "scorecard.md"), "summary": result["summary"]}
+    if "provider_usage" in result:
+        out["provider_usage"] = result["provider_usage"]
+    print(json.dumps(out, indent=2))
     return 0
 
 

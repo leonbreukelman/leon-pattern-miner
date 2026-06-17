@@ -408,6 +408,7 @@ def run_candidate(
     pass_strategy: str = "per_family",
     threshold: float | None = None,
     served_model_ids: list[str] | None = None,
+    provider_usage: Callable[[], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run a candidate model over frozen sessions and write predictions + scorecards."""
     if pass_strategy not in {"per_family", "combined"}:
@@ -473,6 +474,7 @@ def run_candidate(
             encoding="utf-8",
         )
 
+    provider_usage_payload = dict(provider_usage()) if provider_usage is not None else None
     result = {
         "model": model_name,
         "served_model_ids": sorted(observed_model_ids),
@@ -493,6 +495,8 @@ def run_candidate(
         "summary": _summarise_runs(run_scores),
         "artifacts": run_details,
     }
+    if provider_usage_payload is not None:
+        result["provider_usage"] = provider_usage_payload
     if threshold is not None:
         first_gold_total = run_scores[0]["code_level"]["gold_total"] if run_scores else 0
         result["recall_pass"] = (
@@ -502,6 +506,11 @@ def run_candidate(
         json.dumps(result, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    if provider_usage_payload is not None:
+        (output_root / "provider-usage.json").write_text(
+            json.dumps(provider_usage_payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
     (output_root / "scorecard.md").write_text(_render_scorecard(result), encoding="utf-8")
     return result
 
@@ -544,6 +553,28 @@ def _render_scorecard(result: Mapping[str, Any]) -> str:
         f"- transport error-window rate mean ± sd: {_fmt_rate(result['summary']['transport_error_window_rate']['mean'])} ± {_fmt_rate(result['summary']['transport_error_window_rate']['sd'])}",
         f"- transport valid-JSON window rate mean ± sd: {_fmt_rate(result['summary']['transport_valid_json_window_rate']['mean'])} ± {_fmt_rate(result['summary']['transport_valid_json_window_rate']['sd'])}",
     ]
+    provider_usage = result.get("provider_usage")
+    if isinstance(provider_usage, Mapping):
+        cost_obj = provider_usage.get("cost")
+        tokens_obj = provider_usage.get("tokens")
+        cost: Mapping[str, Any] = cost_obj if isinstance(cost_obj, Mapping) else {}
+        tokens: Mapping[str, Any] = tokens_obj if isinstance(tokens_obj, Mapping) else {}
+        lines.extend(
+            [
+                "",
+                "## Provider usage / cost",
+                f"- provider: {provider_usage.get('provider', '(unknown)')}",
+                f"- model: {provider_usage.get('model', '(unknown)')}",
+                f"- reasoning effort: {provider_usage.get('reasoning_effort', '(not recorded)')}",
+                f"- calls made / max: {provider_usage.get('calls_made', 0)} / {provider_usage.get('max_model_calls', 0)}",
+                f"- priced / unpriced calls: {provider_usage.get('calls_priced', 0)} / {provider_usage.get('calls_unpriced', 0)}",
+                f"- tokens prompt/completion/reasoning/cached/total: {tokens.get('prompt', 0)} / {tokens.get('completion', 0)} / {tokens.get('reasoning', 0)} / {tokens.get('cached', 0)} / {tokens.get('total', 0)}",
+                f"- cost source: {cost.get('cost_source', 'unavailable')}",
+                f"- cost USD: {cost.get('cost_usd')}",
+                f"- cost ticks: {cost.get('cost_in_usd_ticks', 0)}",
+                f"- cost cap USD: {provider_usage.get('cost_cap_usd')}; breached: {provider_usage.get('cost_cap_breached', False)}",
+            ]
+        )
     if result.get("threshold") is not None:
         verdict = "PASS" if result.get("recall_pass") else "FAIL"
         lines.append(f"- recall threshold: {result['threshold']} -> {verdict} (recall-only gate)")

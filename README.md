@@ -19,11 +19,11 @@ For extraction-quality or model-quality work, use the CIE/benchmark path:
 
 Because this GitHub repo is public, raw conversation-derived benchmark sessions are not checked in. Quality claims must use a private/sanitized CIE gold-set recall gate and report code-level recall, quote-strict recall, agreement-with-reference, per-bucket results, cost, latency, and caveats. Opus reference findings are a strong reference, not ground truth.
 
-## Legacy/pilot path warning
+## Retired session-level model extractor
 
-`miner extract --use-llm` currently routes through `src/leon_pattern_miner/llm_extractors.py`. Treat that as legacy pilot/provider-smoke scaffolding, not the canonical extraction-quality harness.
+The former session-level model extractor has been removed from active code and CLI surfaces. Keep provider mechanics and model-quality work on the CIE benchmark/adapter path instead of reintroducing ad hoc session extraction.
 
-That path selects/truncates keyword-matched candidate turns and uses a thin prompt. The CLI enforces `--run-purpose provider-smoke` for `--use-llm`; quality or corpus-production purposes are blocked there. It is acceptable for narrow provider-mechanics checks — authentication, JSON envelope, masking, call budget, quote-validation plumbing — but not for deciding whether Grok/Qwen/DiffusionGemma or any other model is good at the north-star task.
+If you previously used `miner extract --use-llm` or the full-corpus monitor scripts, migrate to `scripts/run_benchmark.py` with an explicit dataset, adapter, pass strategy, and provider call/cost ceiling. Historical SQLite tables such as `llm_session_runs` may remain in old local databases as inert leftovers, but active status/report paths no longer read them.
 
 Before any model run, decide which question is being answered:
 
@@ -51,7 +51,7 @@ The active CIE path uses the richer codebook in `src/leon_pattern_miner/cie_code
 
 ## Local runtime note
 
-The local OpenAI-compatible runtime historically used for Qwen/provider-smoke work is `127.0.0.1:8080`, preferably `unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M` on the RTX 4090 with `-c 8192`, `-np 1`, `--no-mmproj`, and thinking disabled. Use this as an adapter/runtime fact, not as permission to evaluate extraction quality through the legacy session extractor. Set `LLM_EXTRACTOR_VERSION` when intentionally comparing/replaying another legacy extractor run.
+The local OpenAI-compatible runtime historically used for Qwen checks is `127.0.0.1:8080`, preferably `unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M` on the RTX 4090 with `-c 8192`, `-np 1`, `--no-mmproj`, and thinking disabled. Use this as an adapter/runtime fact for benchmark runs, not as a separate extraction harness.
 
 ## Current state
 

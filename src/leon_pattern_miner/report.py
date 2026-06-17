@@ -5,7 +5,6 @@ import sqlite3
 from collections import Counter
 from pathlib import Path
 
-from .runner import llm_progress_counts
 from .sensitivity import mask_sensitive
 
 
@@ -72,16 +71,6 @@ def write_pilot_report(
     lines.extend(["", "## Sensitivity counts", ""])
     for key, value in sensitivity_counts.items():
         lines.append(f"- {key}: {value}")
-    lines.extend(["", "## LLM progress", ""])
-    llm_progress = llm_progress_counts(conn)
-    if not llm_progress:
-        lines.append("- no LLM progress recorded")
-    for version, counts in llm_progress.items():
-        lines.append(f"- {version} processed sessions: {counts['processed_sessions']}")
-        lines.append(f"- {version} zero-record processed sessions: {counts['zero_record_processed_sessions']}")
-        lines.append(f"- {version} records created: {counts['records_created']}")
-        lines.append(f"- {version} remaining under retry cap: {counts['remaining_under_retry_cap']}")
-        lines.append(f"- {version} retry-cap excluded sessions: {counts['retry_cap_excluded_sessions']}")
     lines.extend(["", "## Error classes", ""])
     for row in conn.execute("select error_class, count(*) as c from errors group by error_class order by c desc"):
         lines.append(f"- {row['error_class']}: {row['c']}")

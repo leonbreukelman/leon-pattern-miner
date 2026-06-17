@@ -108,6 +108,8 @@ class CIERunSummary:
     errors: int = 0
     skipped_existing_runs: int = 0
     no_signal_windows: int = 0
+    pass_strategy: str = "per_family"
+    no_signal_windows_diagnostic: bool = True
 
 
 def _as_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
@@ -577,6 +579,23 @@ def init_cie_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        create table if not exists cie_rejections(
+            id integer primary key autoincrement,
+            window_id text not null,
+            session_id text not null,
+            extractor_version text not null,
+            family text not null,
+            rejection_index integer not null,
+            rejection_cause text not null,
+            record_json text not null,
+            prompt_hash text,
+            created_at text default (datetime('now')),
+            unique(window_id, extractor_version, family, rejection_index)
+        )
+        """
+    )
     conn.commit()
 
 
@@ -688,6 +707,58 @@ def _insert_records(
     return inserted
 
 
+def _replace_rejections(
+    conn: sqlite3.Connection,
+    window: CIEWindow,
+    rejected: list[dict[str, Any]],
+    *,
+    extractor_version: str,
+    family: str,
+    prompt_hash: str,
+) -> None:
+    conn.execute(
+        """
+        delete from cie_rejections
+        where window_id=? and extractor_version=? and family=?
+        """,
+        (window.window_id, extractor_version, family),
+    )
+    for idx, item in enumerate(rejected):
+        cause = str(item.get("reason") or "unknown") if isinstance(item, dict) else "unknown"
+        conn.execute(
+            """
+            insert into cie_rejections(
+                window_id, session_id, extractor_version, family, rejection_index,
+                rejection_cause, record_json, prompt_hash
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                window.window_id,
+                window.session_id,
+                extractor_version,
+                family,
+                idx,
+                cause,
+                _json(item.get("record") if isinstance(item, dict) else item),
+                prompt_hash,
+            ),
+        )
+
+
+def errored_cie_window_runs(conn: sqlite3.Connection, *, extractor_version: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        select window_id, session_id, extractor_version, family, turn_start, turn_end,
+               token_estimate, error_detail, processed_at
+        from cie_window_runs
+        where extractor_version=? and status='error'
+        order by session_id, turn_start, family
+        """,
+        (extractor_version,),
+    ).fetchall()
+    return [_as_dict(row) for row in rows]
+
+
 def _session_rows(conn: sqlite3.Connection, session_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
@@ -748,6 +819,9 @@ def run_cie_harness(
 
     summary = CIERunSummary()
     counters = dict(summary.__dict__)
+    effective_run_strategy = "combined" if combined_pass else pass_strategy
+    counters["pass_strategy"] = effective_run_strategy
+    counters["no_signal_windows_diagnostic"] = effective_run_strategy == "per_family"
     for session_id in session_ids:
         turns = _session_rows(conn, session_id)
         if not turns:
@@ -809,6 +883,14 @@ def run_cie_harness(
                         conn,
                         window,
                         valid,
+                        extractor_version=extractor_version,
+                        family=family,
+                        prompt_hash=phash,
+                    )
+                    _replace_rejections(
+                        conn,
+                        window,
+                        rejected,
                         extractor_version=extractor_version,
                         family=family,
                         prompt_hash=phash,

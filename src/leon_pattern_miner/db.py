@@ -59,15 +59,6 @@ create table if not exists records (
     created_at text default (datetime('now'))
 );
 
-create table if not exists llm_session_runs (
-    session_id text not null references sessions(session_id),
-    extractor_version text not null,
-    status text not null default 'processed',
-    records_created integer not null default 0,
-    processed_at text default (datetime('now')),
-    primary key(session_id, extractor_version)
-);
-
 create table if not exists runs (
     run_id text primary key,
     started_at text default (datetime('now')),
@@ -83,7 +74,6 @@ create table if not exists errors (
     session_id text,
     attempt integer,
     error_class text not null,
-    extractor_version text,
     payload_excerpt text,
     ts text default (datetime('now'))
 );
@@ -112,21 +102,4 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
-    error_columns = {row["name"] for row in conn.execute("pragma table_info(errors)")}
-    added_extractor_version = False
-    if "extractor_version" not in error_columns:
-        conn.execute("alter table errors add column extractor_version text")
-        added_extractor_version = True
-    # Legacy LLM errors predate version scoping. Backfill them once, when the
-    # migration adds the column, so newer models can rerun old failures without
-    # making every init_db() call scan the errors table.
-    if added_extractor_version:
-        conn.execute(
-            """
-            update errors
-            set extractor_version='local-qwen3-32b-q4km-v3'
-            where error_class='llm_extract_error'
-              and extractor_version is null
-            """
-        )
     conn.commit()

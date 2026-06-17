@@ -1,5 +1,6 @@
 from leon_pattern_miner.cie import (
     build_session_windows,
+    errored_cie_window_runs,
     families_for_window,
     init_cie_tables,
     render_cie_prompt,
@@ -296,6 +297,139 @@ def test_runner_marks_zero_record_windows_processed(tmp_path):
     assert row["status"] == "processed"
     assert row["records_created"] == 0
 
+
+def test_runner_persists_rejection_causes(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    _seed_session(
+        conn,
+        turns=[
+            ("leon", "do not post to GitHub", None),
+            ("agent", "I will verify and report only.", None),
+        ],
+    )
+
+    def fake_chat(prompt, **kwargs):
+        return {
+            "json": {
+                "records": [
+                    {
+                        "codebook_code": "authorization_limit",
+                        "unit": "turn",
+                        "statement": "Synthetic rejected record.",
+                        "actor": "leon",
+                        "source_reliability": "A",
+                        "info_credibility": 1,
+                        "evidence": [{"turn_id": "s:0", "quote": "quote not in source"}],
+                        "assumptions": [],
+                        "alternative_interpretations": [],
+                        "disconfirming_evidence": [],
+                        "falsifiers": [],
+                        "confidence": "high",
+                        "confidence_basis": "synthetic fixture",
+                        "sensitivity": "internal",
+                    }
+                ]
+            }
+        }
+
+    summary = run_cie_harness(
+        conn,
+        extractor_version="cie-reject-test",
+        max_sessions=1,
+        chat_func=fake_chat,
+        max_window_tokens=1200,
+        combined_pass=True,
+    )
+
+    assert summary.records_rejected == 1
+    window_row = conn.execute(
+        "select window_id, extractor_version, family, records_rejected from cie_window_runs"
+    ).fetchone()
+    rejection_rows = conn.execute(
+        """
+        select rejection_cause, record_json from cie_rejections
+        where window_id=? and extractor_version=? and family=?
+        """,
+        (window_row["window_id"], window_row["extractor_version"], window_row["family"]),
+    ).fetchall()
+    accepted_count = conn.execute("select count(*) from cie_records").fetchone()[0]
+
+    assert window_row["records_rejected"] == len(rejection_rows) == 1
+    assert rejection_rows[0]["rejection_cause"] == "quote_not_found"
+    assert "Synthetic rejected record" in rejection_rows[0]["record_json"]
+    assert accepted_count == 0
+
+
+def test_errored_cie_window_runs_selector_returns_only_errors(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    _seed_session(conn, turns=[("leon", "verify this", None)], session_id="s")
+    window = build_session_windows([
+        {"turn_id": "s:0", "session_id": "s", "idx": 0, "actor": "leon", "text": "verify this", "tool_name": ""}
+    ])[0]
+    conn.execute(
+        """
+        insert into cie_window_runs(window_id, session_id, extractor_version, family, turn_start, turn_end, token_estimate, status, error_detail)
+        values (?, ?, 'cie-test', 'all', ?, ?, ?, 'error', 'malformed json')
+        """,
+        (window.window_id, window.session_id, window.turn_start, window.turn_end, window.token_estimate),
+    )
+    conn.execute(
+        """
+        insert into cie_window_runs(window_id, session_id, extractor_version, family, turn_start, turn_end, token_estimate, status)
+        values ('ok-window', 's', 'cie-test', 'all', 0, 0, 1, 'processed')
+        """
+    )
+    conn.commit()
+
+    rows = errored_cie_window_runs(conn, extractor_version="cie-test")
+
+    assert [row["window_id"] for row in rows] == [window.window_id]
+    assert rows[0]["family"] == "all"
+    assert rows[0]["error_detail"] == "malformed json"
+
+
+def test_combined_pass_summary_marks_no_signal_non_diagnostic(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    _seed_session(conn, turns=[("leon", "hello without mining keywords", None)])
+
+    def fake_chat(prompt, **kwargs):
+        return {"json": {"records": []}}
+
+    summary = run_cie_harness(
+        conn,
+        extractor_version="cie-combined-test",
+        max_sessions=1,
+        chat_func=fake_chat,
+        combined_pass=True,
+    )
+
+    assert summary.pass_strategy == "combined"
+    assert summary.no_signal_windows == 0
+    assert summary.no_signal_windows_diagnostic is False
+
+
+def test_per_family_summary_marks_no_signal_diagnostic(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    _seed_session(conn, turns=[("leon", "hello without mining keywords", None)])
+
+    summary = run_cie_harness(
+        conn,
+        extractor_version="cie-per-family-test",
+        max_sessions=1,
+        chat_func=lambda prompt, **kwargs: {"json": {"records": []}},
+        pass_strategy="per_family",
+    )
+
+    assert summary.pass_strategy == "per_family"
+    assert summary.no_signal_windows_diagnostic is True
 
 
 def test_validate_rejects_landed_delivery_with_shortfall_cause():

@@ -5,14 +5,7 @@ from leon_pattern_miner.cli import build_parser
 from leon_pattern_miner.db import connect, init_db
 from leon_pattern_miner.extractors import run_deterministic_extractors
 from leon_pattern_miner.ingest import ingest_hermes_state_db, ingest_path
-from leon_pattern_miner.llm import LLMHealth, chat_json
-from leon_pattern_miner.llm_extractors import (
-    DEFAULT_LLM_EXTRACTOR_VERSION,
-    _coerce_confidence,
-    _prompt_for_turns,
-    run_llm_extractors,
-    validate_llm_record_payloads,
-)
+from leon_pattern_miner.llm import chat_json
 from leon_pattern_miner.report import write_pilot_report
 from leon_pattern_miner.runner import approve_pilot, enqueue_work, reset_stale_running_work, status_snapshot, work_status_counts
 from leon_pattern_miner.sensitivity import mask_sensitive, sensitivity_for_text
@@ -76,13 +69,6 @@ def test_malformed_file_records_error(tmp_path):
     row = conn.execute("select status, error_detail from sessions").fetchone()
     assert row["status"] == "error"
     assert "JSON" in row["error_detail"] or "Expecting" in row["error_detail"]
-
-
-def test_extract_cli_accepts_llm_timeout_for_slow_partial_offload():
-    args = build_parser().parse_args(["extract", "--use-llm", "--llm-max-sessions", "1", "--llm-timeout", "600"])
-
-    assert args.llm_timeout == 600
-    assert args.llm_extractor_version == DEFAULT_LLM_EXTRACTOR_VERSION
 
 
 def test_sensitive_values_are_masked_before_llm_payloads():
@@ -297,59 +283,6 @@ def test_chat_json_retries_once_after_malformed_json(monkeypatch):
     assert len(calls) == 2
 
 
-def test_llm_record_validation_rejects_non_verbatim_evidence(tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    ingest_path(conn, FIXTURE)
-    turns = conn.execute("select * from turns order by idx").fetchall()
-
-    good = {
-        "records": [
-            {
-                "stream": "steering",
-                "pattern_type": "authorization_limit",
-                "summary": "Leon says routine tests do not require asking, but destructive changes do.",
-                "actor": "leon",
-                "scope": "global",
-                "confidence": 0.8,
-                "recommended_sink": "profile_candidate",
-                "evidence": [
-                    {"turn_id": turns[2]["turn_id"], "quote": turns[2]["text"]},
-                ],
-            }
-        ]
-    }
-    bad = {
-        "records": [
-            {
-                "stream": "steering",
-                "pattern_type": "hallucinated",
-                "summary": "Bad evidence must fail.",
-                "actor": "leon",
-                "evidence": [{"turn_id": turns[2]["turn_id"], "quote": "this quote is not in the source"}],
-            }
-        ]
-    }
-
-    assert len(validate_llm_record_payloads(turns, good)) == 1
-    assert validate_llm_record_payloads(turns, bad) == []
-
-
-def test_llm_prompt_is_bounded_and_confidence_strings_are_coerced(tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    ingest_path(conn, FIXTURE)
-    turns = conn.execute("select * from turns order by idx").fetchall()
-
-    prompt = _prompt_for_turns(turns * 200)
-
-    assert len(prompt) < 24000
-    assert _coerce_confidence("high") == 0.8
-    assert _coerce_confidence("medium") == 0.6
-    assert _coerce_confidence("low") == 0.35
-    assert _coerce_confidence(0.91) == 0.91
-
-
 def test_clarification_trigger_rejects_url_question_marks_and_agent_answers(tmp_path):
     conn = connect(tmp_path / "miner.db")
     init_db(conn)
@@ -393,209 +326,6 @@ def test_failure_recovery_arc_requires_structured_failure_not_error_word_prose(t
     assert "target candidates" not in joined
     assert "ModuleNotFoundError" in joined
     assert "exit_code: 2" in joined
-
-
-def test_llm_validation_enforces_role_and_pattern_specific_evidence(tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    _seed_session(
-        conn,
-        turns=[
-            ("leon", "Will the network get DHCP from the customer site?", None),
-            ("agent", "I opened https://example.test/a?x=1 and inspected it.", None),
-            ("agent", "Should I run the pilot first?", None),
-            ("tool", "VERDICT: ACCEPT mentions FabricatedClaimError in prose", "terminal"),
-            ("tool", "ERROR: command failed\nexit_code: 1", "terminal"),
-        ],
-    )
-    turns = conn.execute("select * from turns order by idx").fetchall()
-    payload = {
-        "records": [
-            {"stream": "behavior", "pattern_type": "clarification_trigger", "summary": "wrong role", "actor": "agent", "evidence": [{"turn_id": turns[0]["turn_id"], "quote": turns[0]["text"]}]},
-            {"stream": "behavior", "pattern_type": "clarification_trigger", "summary": "url only", "actor": "agent", "evidence": [{"turn_id": turns[1]["turn_id"], "quote": turns[1]["text"]}]},
-            {"stream": "behavior", "pattern_type": "clarification_trigger", "summary": "real agent question", "actor": "agent", "evidence": [{"turn_id": turns[2]["turn_id"], "quote": turns[2]["text"]}]},
-            {"stream": "behavior", "pattern_type": "failure_recovery_arc", "summary": "prose only", "actor": "agent", "evidence": [{"turn_id": turns[3]["turn_id"], "quote": turns[3]["text"]}]},
-            {"stream": "behavior", "pattern_type": "failure_recovery_arc", "summary": "real failure", "actor": "agent", "evidence": [{"turn_id": turns[4]["turn_id"], "quote": turns[4]["text"]}]},
-        ]
-    }
-
-    valid = validate_llm_record_payloads(turns, payload)
-
-    assert [row["summary"] for row in valid] == ["real agent question", "real failure"]
-
-
-def test_llm_validation_demotes_methodology_status_quotes_even_with_generic_summary(tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    _seed_session(
-        conn,
-        turns=[
-            (
-                "agent",
-                "I’ll continue from the preserved task list: finish the synthetic persona, run an actual local browser/API dogfood, then only implement/refine gaps that the dogfood or Fable review exposes.",
-                None,
-            ),
-        ],
-    )
-    turns = conn.execute("select * from turns order by idx").fetchall()
-    payload = {
-        "records": [
-            {
-                "stream": "methodology",
-                "pattern_type": "strategy_review",
-                "summary": "Reusable Fable/dogfood methodology",
-                "actor": "agent",
-                "scope": "global",
-                "confidence": 0.8,
-                "recommended_sink": "skill_candidate",
-                "evidence": [{"turn_id": turns[0]["turn_id"], "quote": turns[0]["text"]}],
-            }
-        ]
-    }
-
-    valid = validate_llm_record_payloads(turns, payload)
-
-    assert len(valid) == 1
-    assert valid[0]["recommended_sink"] == "report_only"
-
-
-def test_llm_extractor_skips_sessions_after_repeated_errors(monkeypatch, tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    _seed_session(conn, session_id="a", turns=[("agent", "Should I run the stale failed session?", None)])
-    _seed_session(conn, session_id="b", turns=[("agent", "Should I run the healthy session?", None)])
-    conn.executemany(
-        """
-        insert into errors(session_id, error_class, extractor_version, payload_excerpt)
-        values (?, 'llm_extract_error', ?, 'prior failure')
-        """,
-        [("a", DEFAULT_LLM_EXTRACTOR_VERSION), ("a", DEFAULT_LLM_EXTRACTOR_VERSION), ("a", DEFAULT_LLM_EXTRACTOR_VERSION)],
-    )
-    conn.commit()
-    healthy_turn = conn.execute("select * from turns where session_id='b'").fetchone()
-
-    def fake_chat_json(prompt, *, base_url, timeout):
-        return {
-            "json": {
-                "records": [
-                    {
-                        "stream": "behavior",
-                        "pattern_type": "clarification_trigger",
-                        "summary": "healthy agent question",
-                        "actor": "agent",
-                        "scope": "session",
-                        "confidence": 0.7,
-                        "recommended_sink": "report_only",
-                        "evidence": [{"turn_id": healthy_turn["turn_id"], "quote": healthy_turn["text"]}],
-                    }
-                ]
-            },
-            "masked_hits": 0,
-        }
-
-    import leon_pattern_miner.llm_extractors as llm_extractors_module
-
-    monkeypatch.setattr(llm_extractors_module, "health", lambda base_url: LLMHealth(True, "ok"))
-    monkeypatch.setattr(llm_extractors_module, "chat_json", fake_chat_json)
-
-    summary = run_llm_extractors(conn, max_sessions=1)
-
-    assert summary.sessions_processed == 1
-    assert summary.errors == 0
-    assert conn.execute("select count(*) from records where session_id='b'").fetchone()[0] == 1
-    assert conn.execute("select count(*) from records where session_id='a'").fetchone()[0] == 0
-
-
-def test_llm_retry_cap_is_scoped_to_extractor_version(monkeypatch, tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    _seed_session(conn, session_id="a", turns=[("agent", "Should I retry with a better model?", None)])
-    turn = conn.execute("select * from turns where session_id='a'").fetchone()
-    old_version = "local-qwen3-32b-q4km-v3"
-    new_version = DEFAULT_LLM_EXTRACTOR_VERSION
-    conn.executemany(
-        """
-        insert into errors(session_id, error_class, extractor_version, payload_excerpt)
-        values ('a', 'llm_extract_error', ?, 'old model failure')
-        """,
-        [(old_version,), (old_version,)],
-    )
-    conn.commit()
-
-    def fake_chat_json(prompt, *, base_url, timeout):
-        return {
-            "json": {
-                "records": [
-                    {
-                        "stream": "behavior",
-                        "pattern_type": "clarification_trigger",
-                        "summary": "new model retry succeeds",
-                        "actor": "agent",
-                        "scope": "session",
-                        "confidence": 0.7,
-                        "recommended_sink": "report_only",
-                        "evidence": [{"turn_id": turn["turn_id"], "quote": turn["text"]}],
-                    }
-                ]
-            },
-            "masked_hits": 0,
-        }
-
-    import leon_pattern_miner.llm_extractors as llm_extractors_module
-
-    monkeypatch.setattr(llm_extractors_module, "health", lambda base_url: LLMHealth(True, "ok"))
-    monkeypatch.setattr(llm_extractors_module, "chat_json", fake_chat_json)
-
-    summary = run_llm_extractors(conn, extractor_version=new_version, max_sessions=1)
-
-    assert summary.sessions_processed == 1
-    assert conn.execute("select count(*) from records where extractor_version=?", (new_version,)).fetchone()[0] == 1
-
-
-def test_llm_extractor_marks_zero_record_sessions_processed_so_monitor_advances(monkeypatch, tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    _seed_session(conn, session_id="a", turns=[("agent", "I have no durable pattern here.", None)])
-    _seed_session(conn, session_id="b", turns=[("agent", "Should I ask before deployment?", None)])
-    b_turn = conn.execute("select * from turns where session_id='b'").fetchone()
-    calls = []
-
-    def fake_chat_json(prompt, *, base_url, timeout):
-        if "turn_id=a:0" in prompt:
-            calls.append("a")
-            return {"json": {"records": []}, "masked_hits": 0}
-        calls.append("b")
-        return {
-            "json": {
-                "records": [
-                    {
-                        "stream": "behavior",
-                        "pattern_type": "clarification_trigger",
-                        "summary": "agent asks before deploy",
-                        "actor": "agent",
-                        "scope": "session",
-                        "confidence": 0.7,
-                        "recommended_sink": "report_only",
-                        "evidence": [{"turn_id": b_turn["turn_id"], "quote": b_turn["text"]}],
-                    }
-                ]
-            },
-            "masked_hits": 0,
-        }
-
-    import leon_pattern_miner.llm_extractors as llm_extractors_module
-
-    monkeypatch.setattr(llm_extractors_module, "health", lambda base_url: LLMHealth(True, "ok"))
-    monkeypatch.setattr(llm_extractors_module, "chat_json", fake_chat_json)
-
-    first = run_llm_extractors(conn, max_sessions=1)
-    second = run_llm_extractors(conn, max_sessions=1)
-
-    assert first.sessions_processed == 1
-    assert first.records_created == 0
-    assert second.sessions_processed == 1
-    assert second.records_created == 1
-    assert calls == ["a", "b"]
 
 
 def test_career_and_employer_content_is_personal():
@@ -773,37 +503,6 @@ def test_pilot_report_does_not_duplicate_generic_example_section(tmp_path):
     assert "## Example records" not in text
 
 
-def test_report_includes_llm_progress_counters(tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    for sid in ("processed-zero", "processed-records", "excluded", "remaining"):
-        _seed_session(conn, session_id=sid, turns=[("agent", "Should I verify this?", None)])
-        conn.execute("update sessions set status='extracted' where session_id=?", (sid,))
-    conn.execute(
-        "insert into llm_session_runs(session_id, extractor_version, records_created) values ('processed-zero', 'local-qwen3-32b-q4km-v3', 0)"
-    )
-    conn.execute(
-        "insert into llm_session_runs(session_id, extractor_version, records_created) values ('processed-records', 'local-qwen3-32b-q4km-v3', 2)"
-    )
-    conn.executemany(
-        """
-        insert into errors(session_id, error_class, extractor_version, payload_excerpt)
-        values ('excluded', 'llm_extract_error', 'local-qwen3-32b-q4km-v3', ?)
-        """,
-        [("bad json",), ("bad json again",)],
-    )
-    conn.commit()
-
-    report = write_pilot_report(conn, tmp_path / "pilot.md", run_id="progress")
-    text = report.read_text(encoding="utf-8")
-
-    assert "## LLM progress" in text
-    assert "- local-qwen3-32b-q4km-v3 processed sessions: 2" in text
-    assert "- local-qwen3-32b-q4km-v3 zero-record processed sessions: 1" in text
-    assert "- local-qwen3-32b-q4km-v3 retry-cap excluded sessions: 1" in text
-    assert "- local-qwen3-32b-q4km-v3 remaining under retry cap: 1" in text
-
-
 def test_template_like_methodology_quotes_are_deduped_and_status_updates_demoted(tmp_path):
     conn = connect(tmp_path / "miner.db")
     init_db(conn)
@@ -844,60 +543,3 @@ def test_brief_truncation_is_word_bounded_with_ellipsis():
 
     assert brief.endswith("…")
     assert brief == "ask fable to review the…"
-
-
-def test_status_snapshot_counts_llm_progress(tmp_path):
-    conn = connect(tmp_path / "miner.db")
-    init_db(conn)
-    for sid in ("processed-zero", "excluded", "remaining"):
-        _seed_session(conn, session_id=sid, turns=[("agent", "Should I verify this?", None)])
-        conn.execute("update sessions set status='extracted' where session_id=?", (sid,))
-    conn.execute(
-        "insert into llm_session_runs(session_id, extractor_version, records_created) values ('processed-zero', 'local-qwen3-32b-q4km-v3', 0)"
-    )
-    conn.executemany(
-        """
-        insert into errors(session_id, error_class, extractor_version, payload_excerpt)
-        values ('excluded', 'llm_extract_error', 'local-qwen3-32b-q4km-v3', ?)
-        """,
-        [("bad json",), ("bad json again",)],
-    )
-    conn.execute(
-        """
-        insert into records(
-            record_id, session_id, stream, pattern_type, summary, evidence_json,
-            actor, confidence, sensitivity, extractor, extractor_version, recommended_sink
-        ) values (
-            'non-llm-same-version', 'remaining', 'methodology', 'plan_spike_build_verify',
-            'non-LLM record using a colliding version label', '[]', 'agent', 0.5, 'internal',
-            'deterministic', 'local-qwen3-32b-q4km-v3', 'report_only'
-        )
-        """
-    )
-    conn.commit()
-
-    snap = status_snapshot(conn)
-    llm_progress = snap["llm_progress"]
-    assert isinstance(llm_progress, dict)
-
-    assert llm_progress["local-qwen3-32b-q4km-v3"] == {
-        "processed_sessions": 1,
-        "zero_record_processed_sessions": 1,
-        "records_created": 0,
-        "remaining_under_retry_cap": 1,
-        "retry_cap_excluded_sessions": 1,
-    }
-
-
-def test_monitor_scripts_are_resilient_and_amortized():
-    once = Path("scripts/monitor_once.sh").read_text(encoding="utf-8")
-    loop = Path("scripts/run_full_corpus_monitor.sh").read_text(encoding="utf-8")
-
-    assert "extract_status=" in once
-    assert "report_status=" in once
-    assert "monitor extract failed" in once
-    assert "--llm-extractor-version" in once
-    assert 'LLM_EXTRACTOR_VERSION="${LLM_EXTRACTOR_VERSION:-local-qwen3.6-35b-a3b-ud-q4km-c8192-v1}"' in loop
-    assert "r.extractor='local_llm'" in loop
-    assert "e.extractor_version=?" in loop
-    assert 'LLM_BATCH="${LLM_BATCH:-25}"' in loop

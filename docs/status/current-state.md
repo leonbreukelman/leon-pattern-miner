@@ -61,6 +61,10 @@ Corrective guardrails now implemented in code:
 
 `outcome_attribution` is a new additive CIE family for arc/session-level intent → delivery → cause records. It measures stated intent, whether delivery landed/was partial/needed rework/failed, and the attributed cause of shortfalls. The cause facet can explicitly name `leon_instruction` when the transcript supports that Leon's ambiguous or contradictory instruction caused rework or failure. Current status: implemented behind synthetic tests only; no live model calls, private transcript data, or production corpus runs have been performed.
 
+## Public data scrub status
+
+HEAD no longer carries real Hermes session IDs or real transcript quotes in the CIE codebook few-shots. Those examples are synthetic teaching data now, and `tests/test_no_raw_session_data.py` guards tracked source/docs/tests/benchmark/scripts files against reintroducing real `hermes:` session IDs or non-`synthetic:`/`fixture:` JSON `turn_id` values. The two DiffusionGemma smoke docs use a synthetic window label. This cleans the current tree only; the old data remains in public git history and any history rewrite/BFG/filter-repo cleanup is a separate Leon-only decision.
+
 ## Next safe step
 
 Run Grok 4.3 against a private/sanitized CIE gold-set dataset through `scripts/run_benchmark.py --adapter xai --pass-strategy per_family` with explicit `--max-model-calls`, cost/latency tracking, and Leon approval before any paid/off-machine prompt spend beyond a bounded smoke.

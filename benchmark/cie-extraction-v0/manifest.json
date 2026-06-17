@@ -10,7 +10,7 @@
     "per_bucket": 5,
     "seed": 13
   },
-  "codebook_sha256_16": "4630556c8742dbe5",
+  "codebook_sha256_16": "d02adb1d3b7b259e",
   "window_params": {
     "max_window_tokens": 3500,
     "overlap_tokens": 600

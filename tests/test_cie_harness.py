@@ -52,7 +52,7 @@ def test_windowing_covers_long_sessions_with_overlap_and_no_prompt_overflow():
 
 def test_prompt_uses_codebook_fewshots_and_stays_under_budget():
     turns = [
-        {"turn_id": "s:0", "session_id": "s", "idx": 0, "actor": "leon", "text": "do not edit files or post to GitHub", "tool_name": ""},
+        {"turn_id": "s:0", "session_id": "s", "idx": 0, "actor": "leon", "text": "do not edit files or post to the tracker", "tool_name": ""},
         {"turn_id": "s:1", "session_id": "s", "idx": 1, "actor": "agent", "text": "I will only review and report.", "tool_name": ""},
     ]
     window = build_session_windows(turns, max_window_tokens=1000)[0]
@@ -60,7 +60,7 @@ def test_prompt_uses_codebook_fewshots_and_stays_under_budget():
     prompt = render_cie_prompt(window, family="authorization", max_prompt_tokens=2200)
 
     assert "authorization_limit" in prompt
-    assert "Do not edit files or post to GitHub." in prompt
+    assert "Do not edit files or post to the tracker." in prompt
     assert "source_reliability" in prompt
     assert "Return strict JSON" in prompt
     assert len(prompt) // 4 <= 2200
@@ -121,7 +121,7 @@ def test_model_routing_signal_routes_to_authorization_pass_not_dead_family():
 
 def test_validate_rejects_unverifiable_quotes_and_keeps_valid_records():
     source_turns = {
-        "s:0": {"actor": "leon", "text": "that was the wrong kanban, i was refering to the hermes kanban"},
+        "s:0": {"actor": "leon", "text": "that was the wrong checklist, I meant the release checklist"},
         "s:1": {"actor": "agent", "text": "I corrected course."},
     }
     payload = {
@@ -129,15 +129,15 @@ def test_validate_rejects_unverifiable_quotes_and_keeps_valid_records():
             {
                 "codebook_code": "correction_preference",
                 "unit": "turn",
-                "statement": "Leon corrected the target kanban.",
+                "statement": "Leon corrected the target checklist.",
                 "actor": "leon",
                 "source_reliability": "A",
                 "info_credibility": 1,
-                "evidence": [{"turn_id": "s:0", "quote": "wrong kanban"}],
+                "evidence": [{"turn_id": "s:0", "quote": "wrong checklist"}],
                 "assumptions": ["The correction applies to the current task target."],
                 "alternative_interpretations": [{"interpretation": "typo only", "why_less_likely": "explicit redirect"}],
                 "disconfirming_evidence": [],
-                "falsifiers": ["Later turn says Hermes kanban was not intended."],
+                "falsifiers": ["Later turn says the release checklist was not intended."],
                 "confidence": "high",
                 "confidence_basis": "direct user correction",
                 "sensitivity": "internal",
@@ -170,18 +170,18 @@ def test_validate_rejects_unverifiable_quotes_and_keeps_valid_records():
 
 def test_validate_rejects_model_routing_without_named_model_or_routing_language():
     source_turns = {
-        "s:0": {"actor": "leon", "text": "Do not edit files or post to GitHub."},
+        "s:0": {"actor": "leon", "text": "Do not edit files or post to the tracker."},
     }
     payload = {
         "records": [
             {
                 "codebook_code": "model_routing",
                 "unit": "turn",
-                "statement": "Leon limits edits and GitHub posts.",
+                "statement": "Leon limits edits and tracker posts.",
                 "actor": "leon",
                 "source_reliability": "A",
                 "info_credibility": 1,
-                "evidence": [{"turn_id": "s:0", "quote": "Do not edit files or post to GitHub."}],
+                "evidence": [{"turn_id": "s:0", "quote": "Do not edit files or post to the tracker."}],
                 "assumptions": ["The limit applies to this session."],
                 "alternative_interpretations": [],
                 "disconfirming_evidence": [],

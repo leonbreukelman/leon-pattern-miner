@@ -9,9 +9,8 @@ conversation intelligence — not whether a provider endpoint can merely return 
 
 This is the canonical harness/regression fixture for this repo. For real model-quality
 claims, use the same CIE benchmark runner against a private/sanitized gold-set dataset.
-Do not use the legacy `miner extract --use-llm` session-level extractor to judge model
-quality; that path is only provider-smoke scaffolding unless explicitly migrated to CIE
-semantics.
+The former session-level model extractor has been retired; keep provider checks and
+quality scoring on this benchmark/adapter path.
 
 ## What's here
 ```

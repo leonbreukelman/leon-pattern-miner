@@ -251,11 +251,15 @@ def test_provider_call_budget_aggregates_response_usage(monkeypatch):
         "prompt_tokens": 111,
         "completion_tokens": 22,
         "reasoning_tokens": 3,
+        "cached_tokens": 0,
         "total_tokens": 136,
+        "cost_in_usd_ticks": None,
+        "cost_ticks_present": False,
     }
     assert budget.prompt_tokens == 111
     assert budget.completion_tokens == 22
     assert budget.reasoning_tokens == 3
+    assert budget.cached_tokens == 0
     assert budget.total_tokens == 136
 
 

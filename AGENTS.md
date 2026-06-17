@@ -24,27 +24,18 @@ For model-quality or extraction-quality work, use the CIE/benchmark path:
 
 Before claiming a model is good or bad at mining, run it through a private/sanitized CIE gold-set recall gate, not merely the public synthetic fixture. Report code-level recall, quote-strict recall, agreement-with-reference, per-bucket results, cost, latency, and caveats.
 
-## Legacy/pilot extractor boundary
+## Retired session-level model extractor
 
-`miner extract --use-llm` currently calls `src/leon_pattern_miner/llm_extractors.py`. Treat this as legacy/pilot/provider-smoke scaffolding unless a task explicitly says to work on that path.
+The former session-level model extractor has been removed from active code and CLI surfaces. Do not reintroduce an ad hoc session extractor for model-quality, provider-smoke, or corpus work.
 
-The CLI enforces this boundary: `--use-llm` requires `--run-purpose provider-smoke`; `extraction-quality` and `corpus-production` are blocked through that legacy path. Remote provider-smoke runs require explicit live confirmation and retry-aware model-call ceilings.
-
-It does not represent the canonical intelligence-extraction method because it:
-
-- selects at most 20 candidate turns with keyword/regex heuristics;
-- truncates selected turns;
-- uses a thin prompt without the CIE codebook/few-shots;
-- can miss context before the model sees it.
-
-Do not evaluate frontier models, reasoning modes, or production extraction quality through this path. It is acceptable only for narrow provider-mechanics checks such as API authentication, JSON envelope handling, budget gates, and quote-validation plumbing, and reports must label it that way.
+Provider mechanics now belong in the canonical benchmark/adapter path: `scripts/run_benchmark.py`, `src/leon_pattern_miner/adapters.py`, and `src/leon_pattern_miner/llm.py`. Any live provider check must use explicit call ceilings, privacy/spend approval, and clear provider-mechanics labeling.
 
 ## Required decision gate before any model run
 
 Before running a model, state which question is being answered:
 
 1. Provider mechanics? Use a copied DB, tiny bounded run, explicit call ceiling, and label it provider-smoke only.
-2. Extraction quality? Use CIE/benchmark or a gold-set recall gate. Do not use the legacy session extractor.
+2. Extraction quality? Use CIE/benchmark or a gold-set recall gate. Do not use ad hoc session extraction.
 3. Corpus production? Requires a prior quality gate, copied-DB dry run, call/spend ceiling, privacy check, and explicit Leon approval for paid/off-machine prompts.
 
 If the question is ambiguous, default to extraction quality and use the CIE benchmark.

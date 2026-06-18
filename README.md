@@ -35,7 +35,8 @@ Before any model run, decide which question is being answered:
 
 - reads local conversation archives;
 - stores extracted records in local SQLite / frozen benchmark artifacts;
-- writes reports under `reports/`;
+- writes detailed run reports under ignored/local-only `reports/` by default;
+- commits only sanitized status/planning docs to this public repository unless a report is explicitly scrubbed and approved for publication;
 - never auto-promotes records into Hermes memory or skills;
 - promotion requires quote verification, governance, and Leon sign-off through the write-approval gate.
 

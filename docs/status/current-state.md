@@ -1,6 +1,6 @@
 # Current state — leon-pattern-miner
 
-Date: 2026-06-17
+Date: 2026-06-18
 
 ## North star
 
@@ -58,6 +58,7 @@ Corrective guardrails now implemented in code:
 - 2026-06-17 latest-10 real Hermes CIE mining run: Grok 4.3 high reasoning ran on the actual latest 10 Hermes sessions from local `~/.hermes/state.db` in a fresh ignored DB, with `--max-model-calls` equivalent 240 and cost cap `$2.00`. Result: 10 sessions, 358 filtered turns, 31 windows, 120 per-family passes, 48 automated quote-validated records across 7/10 sessions, 15 validator guardrail rejections (`quote_not_found`), 0 errors, exact xAI cost `$1.13624755`, elapsed 1102s. No precision/recall claim: these records are not human-adjudicated or gold-scored. Records are local/private and not promoted. Artifact: `reports/latest10-hermes-real-mining-2026-06-17/report.md`.
 - 2026-06-17 attempted Opus 4.8 max comparison on the same latest-10 real Hermes CIE plan: exact aliases `opus4.8`/`opus-4.8` were unavailable, but `claude --model opus --effort max` preflight reported actual modelUsage `claude-opus-4-8`. The full 120-pass comparison did not complete: Claude Code hit a 429 session limit after a clean parallel attempt reached 20 processed passes, 31 accepted records, 2 validator rejections, and 30 session-limit error rows; last progress cost lower-bound `$6.7425625`. Treat all Opus/Grok agreement numbers from this artifact as partial only, not apples-to-apples quality. Artifact: `reports/latest10-hermes-opus48-max-compare-2026-06-17/partial-report.md`.
 - 2026-06-17 latest-10 real Hermes Grok 4.3 high run with frontier-sized windows: reran the same 10 sessions and same `per_family` strategy with `max_window_tokens=170000`, `overlap_tokens=20000`, and `max_prompt_tokens=190000`. All 10 sessions fit in one window; actual max window estimate was only 23,236 tokens and max prompt estimate 24,723, so the tested change is whole-session windows vs 3.5k chunking, not near-170k prompts. Result: 10 windows, 38 passes, 34 accepted records across 7/10 sessions, 6 `quote_not_found` rejections, 0 errors, exact xAI cost `$0.78290705`, elapsed 467s. Compared with the 3.5k run: -82 calls, -14 records, -$0.35334050 cost, code-level overlap 26 records, quote-overlap 17 records. Opus sanitized review found the arithmetic/framing faithful and no corrections required; interpretation caveats were patched into the report. Artifact: `reports/latest10-hermes-real-mining-170k-grok43-2026-06-17/report.md`.
+- 2026-06-18 $20 full-Hermes breadth-first CIE collection run: Leon authorized a `$20` Grok 4.3 high-reasoning budget to start with the freshest conversations and work older until the budget ceiling or corpus end. A no-call plan found 1,670 sessions / 27,479 filtered turns; all sessions fit one whole-session window. Full canonical `per_family` would require 6,662 prompts and was estimated around `$137`, so the live run used a `combined` all-family pass to maximize coverage under budget. Result: 1,534 / 1,670 sessions attempted newest-to-oldest (91.86%), 1,530 successful processed prompts, 4 errored prompts, 1,352 automated quote-validated candidate records across 964 sessions, 695 validator rejections, elapsed 8.51h. Cost: 1,532 / 1,534 calls returned exact xAI ticks; exact priced cost `$17.65011150`, estimator/effective cost `$19.97388750`, `cost_source=partial`, cap not breached, stopped by pre-call reserve with 136 oldest sessions unscanned. Caveat: this is broad corpus collection, not gold-scored quality or promotion-ready intelligence; records remain local/private. Artifact: `reports/full-hermes-budget20-grok43-2026-06-17/report.md`.
 - Private C0 Qwen-vs-Opus baseline: recall about 0.35, quote-strict about 0.29, agreement-with-Opus about 0.62. The public fixture preserves that score shape for regression only; Opus is a reference, not ground truth.
 - DiffusionGemma local runtime exists but did not emit a valid CIE JSON envelope on a real CIE window; do not run/report a full scorecard yet.
 - Grok 4.3 provider adapter mechanics and CIE benchmark adapter plumbing are implemented. The prior 50-session none/low/high reasoning results remain legacy-harness results only and should not be used to judge extraction quality or production readiness.
@@ -73,7 +74,7 @@ Corrective guardrails now implemented in code:
 
 ## Outcome attribution extension
 
-`outcome_attribution` is a new additive CIE family for arc/session-level intent → delivery → cause records. It measures stated intent, whether delivery landed/was partial/needed rework/failed, and the attributed cause of shortfalls. The cause facet can explicitly name `leon_instruction` when the transcript supports that Leon's ambiguous or contradictory instruction caused rework or failure. Current status: implemented behind synthetic tests only; no live model calls, private transcript data, or production corpus runs have been performed.
+`outcome_attribution` is a new additive CIE family for arc/session-level intent → delivery → cause records. It measures stated intent, whether delivery landed/was partial/needed rework/failed, and the attributed cause of shortfalls. The cause facet can explicitly name `leon_instruction` when the transcript supports that Leon's ambiguous or contradictory instruction caused rework or failure. Current status: implemented behind synthetic tests and exposed to the 2026-06-18 combined full-Hermes collection run, but that run produced no accepted outcome-attribution code and 620 `outcome_facets_invalid` validator rejections. Do not rely on outcome-attribution output until the prompt/schema path is tightened and rerun selectively.
 
 ## Public data scrub status
 
@@ -81,7 +82,7 @@ HEAD no longer carries real Hermes session IDs or real transcript quotes in the 
 
 ## Next safe step
 
-Before a larger Grok 4.3 high-reasoning mining/evaluation run, do not use the scrubbed public fixture as a quality proxy. Use a private/sanitized CIE gold set or generate a public-safe fixture with semantically meaningful synthetic conversations whose family triggers match the gold. Latest-10 real Hermes records must be adjudicated/clustered before any promotion to memory/skills; do not promote them automatically. Any next paid/off-machine quality run should still use `scripts/run_benchmark.py --adapter xai --pass-strategy per_family` with explicit `--max-model-calls` and `--cost-cap-usd`; the runner now persists exact xAI cost ticks when present. Leon approval is still required before a larger paid/off-machine batch run.
+The 2026-06-18 `$20` full-Hermes combined pass produced broad local candidate records, not adjudicated memory/skill material. Next safe step is local clustering/adjudication of `records-private.json`, with special scrutiny for authorization/model-routing records and a separate fix/rerun for outcome-attribution validation. Do not promote records automatically. Any next paid/off-machine quality run should still use `scripts/run_benchmark.py --adapter xai --pass-strategy per_family` with explicit `--max-model-calls` and `--cost-cap-usd`; Leon approval is still required for additional paid/off-machine batch spend.
 
 Use the public `benchmark/cie-extraction-v0/` fixture only for harness mechanics/regression unless/until a per-family public-safe fixture is generated.
 
@@ -95,7 +96,7 @@ Required report shape for a real quality run:
 - cost and latency;
 - caveats, including small v0 benchmark size and Opus-reference-not-ground-truth.
 
-Do not run full corpus until this quality gate is done and Leon approves any paid/off-machine prompt spend.
+Do not treat the 2026-06-18 full-corpus combined pass as a quality gate or as promotion approval; it is a local candidate-collection artifact that needs adjudication.
 
 ## Historical docs policy
 

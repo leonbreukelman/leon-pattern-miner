@@ -265,6 +265,23 @@ def _few_shots_for_family(family: str, codebook: dict[str, Any], *, limit: int =
             examples.append(shot)
     positives = [ex for ex in examples if not ex.get("negative_or_near_miss")]
     negatives = [ex for ex in examples if ex.get("negative_or_near_miss")]
+    if family == "all":
+        positive_limit = max(0, limit - 2)
+        selected_positives = positives[:positive_limit]
+        outcome_example = next(
+            (
+                ex
+                for ex in positives
+                if ex.get("codebook_code") == "rework_cause" and ex.get("facets")
+            ),
+            None,
+        )
+        if outcome_example is not None and outcome_example not in selected_positives:
+            if len(selected_positives) >= positive_limit and selected_positives:
+                selected_positives[-1] = outcome_example
+            else:
+                selected_positives.append(outcome_example)
+        return (selected_positives + negatives[:2])[:limit]
     return (positives[: max(0, limit - 2)] + negatives[:2])[:limit]
 
 
@@ -312,7 +329,19 @@ def render_cie_prompt_bundle(
                 "actor": "leon|agent|tool|system|unknown",
                 "source_reliability": "A|B|C|D|E|F",
                 "info_credibility": 1,
-                "facets": {},
+                "facets": {
+                    "delivery": (
+                        "REQUIRED for outcome_attribution codes "
+                        "(intent_stated, delivery_result, rework_cause): one of "
+                        "landed|partial|rework|failed|unknown; "
+                        "intent_stated uses unknown; omit or {} for non-outcome codes"
+                    ),
+                    "cause": (
+                        "REQUIRED for outcome_attribution codes: one of "
+                        "leon_instruction|agent|tool|environment|none; "
+                        "intent_stated uses none; rework_cause MUST name a non-none cause"
+                    ),
+                },
                 "evidence": [{"turn_id": "exact id", "quote": "verbatim substring"}],
                 "assumptions": ["explicit assumption"],
                 "alternative_interpretations": [
@@ -344,6 +373,7 @@ def render_cie_prompt_bundle(
         "6. Use source_reliability A only for direct Leon instructions/corrections or system-enforced hard blocks; C for agent self-report; D for tool output.",
         "7. unit must be turn, exchange, arc, or session; cross_session is forbidden here.",
         "8. Include assumptions, alternatives, falsifiers, and confidence_basis for each record.",
+        "9. For outcome_attribution codes (intent_stated, delivery_result, rework_cause), populate facets: delivery ∈ {landed, partial, rework, failed, unknown} and cause ∈ {leon_instruction, agent, tool, environment, none}; intent_stated uses delivery=unknown and cause=none; rework_cause requires a non-none cause and a partial/rework/failed delivery. Records with missing or invalid facets are rejected.",
         "Output schema:",
         json.dumps(payload_schema, ensure_ascii=False),
         "Window turns:",

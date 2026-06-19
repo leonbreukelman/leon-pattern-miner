@@ -551,6 +551,7 @@
     "Output strict JSON per schema; one record per finding; enforce unit\u2208{turn,exchange,arc,session}, source_reliability\u2208A..F, info_credibility\u22081..6.",
     "Grade reliability by actor: direct Leon instruction or system-enforced block = A; agent self-report = B/C; unjudgeable = F.",
     "Always emit a window/session progress marker, including an explicit zero-record marker when nothing is found (fixes prior under-extraction silence).",
-    "Allow a finding's codebook_code to differ from the source family label; carry both."
+    "Allow a finding's codebook_code to differ from the source family label; carry both.",
+    "For outcome_attribution codes (intent_stated, delivery_result, rework_cause), populate facets: delivery in {landed, partial, rework, failed, unknown} and cause in {leon_instruction, agent, tool, environment, none}; intent_stated uses delivery=unknown and cause=none; rework_cause requires a non-none cause and a partial/rework/failed delivery. Records with missing or invalid facets are rejected."
   ]
 }

@@ -92,3 +92,63 @@ def write_pilot_report(
 
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
     return path
+
+
+def write_findings_report(
+    conn: sqlite3.Connection,
+    path: str | Path = "runtime/findings-report.md",
+    *,
+    limit_per_family: int | None = None,
+) -> Path:
+    """Write a human-readable CIE register report grouped by family and frequency."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = conn.execute(
+        """
+        select family, codebook_code, statement, occurrence_count, last_seen, created_at
+        from cie_records
+        where quote_verified=1
+        order by family, occurrence_count desc, coalesce(last_seen, created_at) desc, statement
+        """
+    ).fetchall()
+    total_rows = conn.execute("select count(*) from cie_records where quote_verified=1").fetchone()[0]
+    total_occurrences = conn.execute(
+        "select coalesce(sum(occurrence_count), 0) from cie_records where quote_verified=1"
+    ).fetchone()[0]
+    collapsed = int(total_occurrences or 0) - int(total_rows or 0)
+
+    lines = [
+        "# Findings register report",
+        "",
+        "Local-only report from `cie_records`. Statements are quote-verified before entering the register.",
+        "",
+        "## Summary",
+        "",
+        f"- rows: {total_rows}",
+        f"- total_occurrences: {total_occurrences}",
+        f"- dedup_collapsed_occurrences: {collapsed}",
+        "",
+    ]
+    current_family: str | None = None
+    emitted_for_family = 0
+    for row in rows:
+        family = str(row["family"])
+        if family != current_family:
+            current_family = family
+            emitted_for_family = 0
+            lines.extend(
+                [
+                    f"## {family}",
+                    "",
+                    "| statement | count | last_seen |",
+                    "|---|---:|---|",
+                ]
+            )
+        if limit_per_family is not None and emitted_for_family >= limit_per_family:
+            continue
+        statement = str(row["statement"] or "").replace("|", "\\|").replace("\n", " ")
+        last_seen = row["last_seen"] or row["created_at"] or ""
+        lines.append(f"| {statement} | {row['occurrence_count']} | {last_seen} |")
+        emitted_for_family += 1
+    path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return path

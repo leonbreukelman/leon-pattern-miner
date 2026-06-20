@@ -10,6 +10,7 @@ create table if not exists sessions (
     format text not null,
     turn_count integer not null default 0,
     content_hash text,
+    started_at real,
     ingested_at text default (datetime('now')),
     status text not null default 'pending',
     error_detail text
@@ -86,8 +87,27 @@ create table if not exists approvals (
     notes text
 );
 
+create table if not exists miner_state (
+    key text primary key,
+    value text not null,
+    updated_at text default (datetime('now'))
+);
+
 insert or ignore into approvals(key, value) values ('pilot_approved', 'false');
 """
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"pragma table_info({table})")}
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    if column not in _columns(conn, table):
+        conn.execute(f"alter table {table} add column {column} {ddl}")
+
+
+def _migrate_db(conn: sqlite3.Connection) -> None:
+    _ensure_column(conn, "sessions", "started_at", "real")
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
@@ -102,4 +122,21 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate_db(conn)
+    conn.commit()
+
+
+def get_state(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("select value from miner_state where key=?", (key,)).fetchone()
+    return str(row["value"]) if row else None
+
+
+def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """
+        insert into miner_state(key, value, updated_at) values (?, ?, datetime('now'))
+        on conflict(key) do update set value=excluded.value, updated_at=excluded.updated_at
+        """,
+        (key, value),
+    )
     conn.commit()

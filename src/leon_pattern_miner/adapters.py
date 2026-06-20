@@ -45,11 +45,12 @@ def make_xai_adapter(cfg: AdapterConfig) -> ChatFunc:
         max_tokens: int = 4096,
         model: str | None = None,
     ) -> dict[str, Any]:
+        reasoning_effort = None if cfg.xai_reasoning_effort == "none" else cfg.xai_reasoning_effort
         config = OpenAIProviderConfig.xai(
             model=model or "grok-4.3",
             base_url=base_url,
             api_key_env=cfg.xai_api_key_env,
-            reasoning_effort=cfg.xai_reasoning_effort,
+            reasoning_effort=reasoning_effort,
         )
         return cfg.provider_chat_func(
             prompt,

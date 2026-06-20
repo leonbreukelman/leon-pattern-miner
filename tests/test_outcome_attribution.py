@@ -39,6 +39,18 @@ def test_prompt_bundle_includes_outcome_cards_and_quote_sources():
     bundle = render_cie_prompt_bundle(win, family="outcome_attribution", codebook=cb)
     assert "rework_cause" in bundle.prompt and bundle.quote_sources
 
+
+def test_prompt_tells_model_to_extract_grounded_shortfall_and_cause_only_when_evidenced():
+    cb = load_default_codebook()
+    win = build_session_windows([_turn(0, "agent", "I built the wrong path, so this needs rework")])[0]
+    prompt = render_cie_prompt_bundle(win, family="outcome_attribution", codebook=cb).prompt
+    assert "When delivery_result is partial|rework|failed" in prompt
+    assert "attempt a rework_cause" in prompt
+    assert "evidence MAY combine multiple quotes" in prompt
+    assert "If no cause evidence exists, omit rework_cause" in prompt
+    assert "agent self-admits the wrong implementation target" in prompt
+    assert "CI failure, not user instruction, causes a failed delivery" in prompt
+
 def test_validator_accepts_leon_caused_rework():
     text = "the spec I gave was ambiguous, redo it against the hermes board"
     valid, rejected = validate_cie_payload(
@@ -66,6 +78,85 @@ def test_validator_rejects_fabricated_quote():
         _payload("delivery_result", "landed", "none", "merged and shipped to prod", rel="C", cred=3, actor="agent"),
         _src(text), family="outcome_attribution", quote_source_texts={"synthetic:s1:0": text})
     assert not valid and rejected
+    assert rejected[0]["reason"] == "quote_not_found"
+
+
+def test_validator_rebinds_missing_turn_id_from_verbatim_quote():
+    text = "I built the wrong path and need to redo it against the real target."
+    src = {"synthetic:s1:0": {"turn_id": "synthetic:s1:0", "actor": "agent", "text": text}}
+    payload = _payload("delivery_result", "rework", "none", "I built the wrong path", rel="C", cred=3, actor="agent")
+    payload["records"][0]["evidence"][0]["turn_id"] = "synthetic:s1:missing"
+
+    valid, rejected = validate_cie_payload(
+        payload,
+        src,
+        family="outcome_attribution",
+        quote_source_texts={"synthetic:s1:0": text},
+    )
+
+    assert len(valid) == 1 and not rejected
+    assert valid[0]["evidence"][0]["turn_id"] == "synthetic:s1:0"
+    assert valid[0]["evidence_rebindings"][0]["cited_turn_id"] == "synthetic:s1:missing"
+    assert valid[0]["evidence_rebindings"][0]["resolved_turn_id"] == "synthetic:s1:0"
+    assert valid[0]["evidence_rebindings"][0]["reason"] == "turn_id_not_found"
+
+
+def test_validator_rebinds_quote_mismatch_to_unique_matching_turn():
+    src = {
+        "synthetic:s1:0": {"turn_id": "synthetic:s1:0", "actor": "agent", "text": "I only started the work."},
+        "synthetic:s1:1": {"turn_id": "synthetic:s1:1", "actor": "agent", "text": "I built the wrong path and had to redo it."},
+    }
+    payload = _payload("delivery_result", "rework", "none", "I built the wrong path", rel="C", cred=3, actor="agent")
+    payload["records"][0]["evidence"][0]["turn_id"] = "synthetic:s1:0"
+
+    valid, rejected = validate_cie_payload(
+        payload,
+        src,
+        family="outcome_attribution",
+        quote_source_texts={key: value["text"] for key, value in src.items()},
+    )
+
+    assert len(valid) == 1 and not rejected
+    assert valid[0]["evidence"][0]["turn_id"] == "synthetic:s1:1"
+    assert valid[0]["evidence_rebindings"][0]["reason"] == "quote_not_in_cited_turn"
+
+
+def test_validator_ambiguous_rebind_takes_first_match_and_logs_ambiguity():
+    src = {
+        "synthetic:s1:0": {"turn_id": "synthetic:s1:0", "actor": "agent", "text": "redo it now"},
+        "synthetic:s1:1": {"turn_id": "synthetic:s1:1", "actor": "agent", "text": "redo it now"},
+    }
+    payload = _payload("delivery_result", "rework", "none", "redo it now", rel="C", cred=3, actor="agent")
+    payload["records"][0]["evidence"][0]["turn_id"] = "synthetic:s1:missing"
+
+    valid, rejected = validate_cie_payload(
+        payload,
+        src,
+        family="outcome_attribution",
+        quote_source_texts={key: value["text"] for key, value in src.items()},
+    )
+
+    assert len(valid) == 1 and not rejected
+    assert valid[0]["evidence"][0]["turn_id"] == "synthetic:s1:0"
+    assert valid[0]["evidence_rebindings"][0]["ambiguous"] is True
+    assert valid[0]["evidence_rebindings"][0]["match_count"] == 2
+
+
+def test_fabricated_quote_with_missing_turn_id_is_still_rejected_guard():
+    text = "I started the work but did not finish it."
+    src = {"synthetic:s1:0": {"turn_id": "synthetic:s1:0", "actor": "agent", "text": text}}
+    payload = _payload("delivery_result", "failed", "none", "merged and shipped to prod", rel="C", cred=3, actor="agent")
+    payload["records"][0]["evidence"][0]["turn_id"] = "synthetic:s1:missing"
+
+    valid, rejected = validate_cie_payload(
+        payload,
+        src,
+        family="outcome_attribution",
+        quote_source_texts={"synthetic:s1:0": text},
+    )
+
+    assert not valid
+    assert rejected[0]["reason"] == "quote_not_found"
 
 # LOAD-BEARING: the feature exists to make this non-zero. Do not weaken.
 def test_scorer_surfaces_leon_as_a_cause():

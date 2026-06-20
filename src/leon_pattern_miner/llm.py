@@ -458,6 +458,9 @@ def chat_json_provider(
             "json": parsed,
             "masked_hits": total_masked_hits,
             "model_ids": [served_model or payload["model"]],
+            "raw_content": content,
+            "raw_response": raw,
+            "request_payload": payload,
         }
         if usage is not None:
             result["usage"] = usage
@@ -484,4 +487,7 @@ def chat_json(
     )
     # Preserve the historical local chat_json contract used by existing tests/callers.
     result.pop("model_ids", None)
+    result.pop("raw_content", None)
+    result.pop("raw_response", None)
+    result.pop("request_payload", None)
     return result

@@ -463,6 +463,98 @@
     },
     {
       "source_family": "outcome_attribution",
+      "codebook_code": "delivery_result",
+      "unit": "arc",
+      "source_reliability": "C",
+      "info_credibility": 2,
+      "facets": {
+        "delivery": "rework",
+        "cause": "none"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:rework-result:2",
+          "quote": "I built the wrong primary path, so this needs a redo before handoff."
+        }
+      ],
+      "statement": "The arc did not land; the agent reports wrong-path work that requires rework.",
+      "why": "Positive implicit-cause delivery example: emit delivery_result=rework on shortfall evidence even before deciding whether a separate cause is grounded.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "outcome_attribution",
+      "codebook_code": "rework_cause",
+      "unit": "arc",
+      "source_reliability": "C",
+      "info_credibility": 2,
+      "facets": {
+        "delivery": "rework",
+        "cause": "agent"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:agent-cause:1",
+          "quote": "The deliverable is wrong-path work and needs rework."
+        },
+        {
+          "turn_id": "synthetic:outcome:agent-cause:2",
+          "quote": "I built the wrong primary path instead of the requested review artifact."
+        }
+      ],
+      "statement": "The shortfall is caused by the agent building the wrong target/path.",
+      "why": "Positive implicit-cause example: agent self-admits the wrong implementation target; evidence combines the shortfall quote and the cause quote.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "outcome_attribution",
+      "codebook_code": "rework_cause",
+      "unit": "arc",
+      "source_reliability": "A",
+      "info_credibility": 1,
+      "facets": {
+        "delivery": "rework",
+        "cause": "leon_instruction"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:leon-reversal:0",
+          "quote": "Change direction: stop building the admin flow and make the public proof artifact instead."
+        },
+        {
+          "turn_id": "synthetic:outcome:leon-reversal:2",
+          "quote": "The prior admin-flow work is now rework because the target changed mid-stream."
+        }
+      ],
+      "statement": "A mid-stream Leon instruction changed the target and caused rework of the earlier path.",
+      "why": "Positive implicit-cause example: Leon's explicit reversal/change of target is the transcript-grounded cause; evidence combines instruction and resulting rework.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "outcome_attribution",
+      "codebook_code": "rework_cause",
+      "unit": "arc",
+      "source_reliability": "D",
+      "info_credibility": 2,
+      "facets": {
+        "delivery": "failed",
+        "cause": "tool"
+      },
+      "evidence": [
+        {
+          "turn_id": "synthetic:outcome:tool-cause:3",
+          "quote": "pytest failed before producing the artifact."
+        },
+        {
+          "turn_id": "synthetic:outcome:tool-cause:4",
+          "quote": "subprocess.CalledProcessError: command returned non-zero exit status 1"
+        }
+      ],
+      "statement": "The delivery failed because the tool/test command failed before artifact generation.",
+      "why": "Positive implicit-cause example: CI failure, not user instruction, causes a failed delivery; evidence combines the failed-delivery quote and the tool-error quote.",
+      "negative_or_near_miss": false
+    },
+    {
+      "source_family": "outcome_attribution",
       "codebook_code": "none",
       "unit": "arc",
       "source_reliability": "A",
@@ -552,6 +644,7 @@
     "Grade reliability by actor: direct Leon instruction or system-enforced block = A; agent self-report = B/C; unjudgeable = F.",
     "Always emit a window/session progress marker, including an explicit zero-record marker when nothing is found (fixes prior under-extraction silence).",
     "Allow a finding's codebook_code to differ from the source family label; carry both.",
-    "For outcome_attribution codes (intent_stated, delivery_result, rework_cause), populate facets: delivery in {landed, partial, rework, failed, unknown} and cause in {leon_instruction, agent, tool, environment, none}; intent_stated uses delivery=unknown and cause=none; rework_cause requires a non-none cause and a partial/rework/failed delivery. Records with missing or invalid facets are rejected."
+    "For outcome_attribution codes (intent_stated, delivery_result, rework_cause), populate facets: delivery in {landed, partial, rework, failed, unknown} and cause in {leon_instruction, agent, tool, environment, none}; intent_stated uses delivery=unknown and cause=none; rework_cause requires a non-none cause and a partial/rework/failed delivery. Records with missing or invalid facets are rejected.",
+    "When delivery_result is partial|rework|failed, attempt rework_cause only if transcript evidence explains why (Leon correction/reversal/ambiguity, agent admission, tool/CI/environment error). Evidence may combine multiple verbatim quotes. If no cause evidence exists, omit rework_cause rather than inventing one."
   ]
 }

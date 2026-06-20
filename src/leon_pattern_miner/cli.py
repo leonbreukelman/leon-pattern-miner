@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from .db import connect, init_db
@@ -115,6 +117,41 @@ def cmd_mine(args: argparse.Namespace) -> int:
     return 0
 
 
+def _backup_sqlite_db(source_path: Path, backup_dir: Path) -> Path:
+    source_path = source_path.expanduser()
+    if not source_path.exists():
+        raise FileNotFoundError(source_path)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    suffix = source_path.suffix or ".db"
+    backup_path = backup_dir / f"{source_path.stem}.pre-dedup-rekey.{timestamp}{suffix}"
+    source_uri = f"file:{source_path}?mode=ro"
+    with sqlite3.connect(source_uri, uri=True) as source, sqlite3.connect(backup_path) as backup:
+        source.backup(backup)
+    return backup_path
+
+
+def cmd_rekey_dedup(args: argparse.Namespace) -> int:
+    from .cie import rekey_cie_record_dedup
+
+    backup_path = _backup_sqlite_db(args.db, args.backup_dir)
+    conn = _conn(args.db)
+    summary = rekey_cie_record_dedup(conn)
+    print(
+        json.dumps(
+            {
+                "backup_path": str(backup_path),
+                "occurrence_conserved": summary.total_occurrences_before
+                == summary.total_occurrences_after,
+                "rekey": summary.__dict__,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_schedule_template(args: argparse.Namespace) -> int:
     paths = write_schedule_templates(args.output_dir, mine_command=args.mine_command)
     print(json.dumps({"schedule_templates": [str(path) for path in paths], "enabled": False}, indent=2))
@@ -198,6 +235,10 @@ def build_parser() -> argparse.ArgumentParser:
     mine.add_argument("--no-preflight", action="store_true")
     mine.add_argument("--report", type=Path, default=Path("runtime/findings-report.md"))
     mine.set_defaults(func=cmd_mine)
+
+    rekey = sub.add_parser("rekey-dedup")
+    rekey.add_argument("--backup-dir", type=Path, default=Path("runtime"))
+    rekey.set_defaults(func=cmd_rekey_dedup)
 
     schedule = sub.add_parser("schedule-template")
     schedule.add_argument("--output-dir", type=Path, default=Path("runtime/schedule"))

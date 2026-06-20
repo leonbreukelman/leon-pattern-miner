@@ -1,7 +1,7 @@
 import json
 import re
 
-from leon_pattern_miner.cie import init_cie_tables, run_cie_harness
+from leon_pattern_miner.cie import init_cie_tables, rekey_cie_record_dedup, run_cie_harness
 from leon_pattern_miner.db import connect, init_db
 from leon_pattern_miner.ingest import IngestResult
 from leon_pattern_miner.llm import ProviderCallBudget
@@ -62,7 +62,7 @@ def _make_state_db(path):
     return source
 
 
-def test_cie_records_dedup_exact_normalized_duplicates_increment_occurrence_count(tmp_path):
+def test_cie_records_dedup_same_code_and_evidence_quote_merge_statement_variants(tmp_path):
     conn = connect(tmp_path / "miner.db")
     init_db(conn)
     init_cie_tables(conn)
@@ -73,7 +73,11 @@ def test_cie_records_dedup_exact_normalized_duplicates_increment_occurrence_coun
     def fake_chat(prompt, **kwargs):
         nonlocal calls
         calls += 1
-        statement = "  LEON requires evidence-backed verification!!!  " if calls == 1 else "leon requires evidence-backed verification"
+        statement = (
+            "Leon requires evidence-backed verification before reporting."
+            if calls == 1
+            else "The agent must verify claims with evidence before it reports completion."
+        )
         return {"json": {"records": [_record_for_prompt(prompt, statement=statement)]}}
 
     summary = run_cie_harness(
@@ -91,18 +95,22 @@ def test_cie_records_dedup_exact_normalized_duplicates_increment_occurrence_coun
     assert row["dedup_key"]
 
 
-def test_cie_records_dedup_keeps_distinct_findings_even_with_same_quote(tmp_path):
+def test_cie_records_dedup_keeps_distinct_findings_with_different_evidence_quotes(tmp_path):
     conn = connect(tmp_path / "miner.db")
     init_db(conn)
     init_cie_tables(conn)
-    _seed_session(conn, "fixture:s1", "please verify this before reporting")
+    _seed_session(conn, "fixture:s1", "please verify this before reporting; please review this before handoff")
 
     def fake_chat(prompt, **kwargs):
         return {
             "json": {
                 "records": [
                     _record_for_prompt(prompt, statement="Leon requires verification."),
-                    _record_for_prompt(prompt, statement="Leon requires review before handoff."),
+                    _record_for_prompt(
+                        prompt,
+                        statement="Leon requires review before handoff.",
+                        quote="please review this",
+                    ),
                 ]
             }
         }
@@ -119,6 +127,171 @@ def test_cie_records_dedup_keeps_distinct_findings_even_with_same_quote(tmp_path
     rows = conn.execute("select statement, occurrence_count from cie_records order by statement").fetchall()
     assert [row["occurrence_count"] for row in rows] == [1, 1]
     assert len(rows) == 2
+
+
+def test_cie_records_dedup_keeps_same_primary_quote_with_different_secondary_quotes_distinct(
+    tmp_path,
+):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    primary = "primary shared evidence"
+    secondary_a = "alpha secondary anchor"
+    secondary_b = "beta secondary anchor"
+    _seed_session(conn, "fixture:s1", f"{primary}; {secondary_a}")
+    _seed_session(conn, "fixture:s2", f"{primary}; {secondary_b}")
+    calls = 0
+
+    def fake_chat(prompt, **kwargs):
+        nonlocal calls
+        calls += 1
+        match = re.search(r"turn_id=([^\s]+)", prompt)
+        assert match is not None
+        turn_id = match.group(1)
+        secondary = secondary_a if calls == 1 else secondary_b
+        record = _record_for_prompt(prompt, statement="Leon requires evidence-backed review.", quote=primary)
+        record["evidence"] = [
+            {"turn_id": turn_id, "quote": primary},
+            {"turn_id": turn_id, "quote": secondary},
+        ]
+        return {"json": {"records": [record]}}
+
+    summary = run_cie_harness(
+        conn,
+        extractor_version="fixture-secondary-distinct",
+        session_ids=["fixture:s1", "fixture:s2"],
+        chat_func=fake_chat,
+        combined_pass=True,
+    )
+
+    rows = conn.execute("select statement, occurrence_count from cie_records").fetchall()
+    assert summary.records_created == 2
+    assert len(rows) == 2
+    assert [row["occurrence_count"] for row in rows] == [1, 1]
+
+
+def test_cie_records_dedup_same_quote_set_merges_even_when_evidence_order_differs(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    quote_a = "primary shared evidence"
+    quote_b = "secondary shared evidence"
+    _seed_session(conn, "fixture:s1", f"{quote_a}; {quote_b}")
+    _seed_session(conn, "fixture:s2", f"{quote_a}; {quote_b}")
+    calls = 0
+
+    def fake_chat(prompt, **kwargs):
+        nonlocal calls
+        calls += 1
+        match = re.search(r"turn_id=([^\s]+)", prompt)
+        assert match is not None
+        turn_id = match.group(1)
+        evidence = [
+            {"turn_id": turn_id, "quote": quote_a},
+            {"turn_id": turn_id, "quote": quote_b},
+        ]
+        if calls == 2:
+            evidence = list(reversed(evidence))
+        record = _record_for_prompt(prompt, statement="Leon requires evidence-backed review.", quote=quote_a)
+        record["evidence"] = evidence
+        return {"json": {"records": [record]}}
+
+    summary = run_cie_harness(
+        conn,
+        extractor_version="fixture-quote-set-merge",
+        session_ids=["fixture:s1", "fixture:s2"],
+        chat_func=fake_chat,
+        combined_pass=True,
+    )
+
+    row = conn.execute("select occurrence_count from cie_records").fetchone()
+    assert summary.records_created == 1
+    assert conn.execute("select count(*) from cie_records").fetchone()[0] == 1
+    assert row["occurrence_count"] == 2
+
+
+def test_cie_records_dedup_short_shared_quote_does_not_merge_distinct_statements(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    _seed_session(conn, "fixture:s1", "OK")
+    _seed_session(conn, "fixture:s2", "OK")
+    calls = 0
+
+    def fake_chat(prompt, **kwargs):
+        nonlocal calls
+        calls += 1
+        statement = "Leon gives approval." if calls == 1 else "Leon acknowledges a test result."
+        return {"json": {"records": [_record_for_prompt(prompt, statement=statement, quote="OK")]}}
+
+    summary = run_cie_harness(
+        conn,
+        extractor_version="fixture-short-anchor",
+        session_ids=["fixture:s1", "fixture:s2"],
+        chat_func=fake_chat,
+        combined_pass=True,
+    )
+
+    rows = conn.execute("select statement, occurrence_count from cie_records order by statement").fetchall()
+    assert summary.records_created == 2
+    assert len(rows) == 2
+    assert [row["occurrence_count"] for row in rows] == [1, 1]
+
+
+def test_cie_record_rekey_migration_conserves_occurrences_and_keeps_representative(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    _seed_session(conn, "fixture:s1", "please verify this before reporting")
+    evidence = json.dumps([{"turn_id": "fixture:s1:0", "quote": "please verify this"}])
+    rows = [
+        ("old-1", "Short statement", 2, "2026-01-01 00:00:00", "2026-01-02 00:00:00"),
+        (
+            "old-2",
+            "Longer representative statement that should survive the merge",
+            3,
+            "2026-01-03 00:00:00",
+            "2026-01-04 00:00:00",
+        ),
+    ]
+    for idx, (dedup_key, statement, count, first_seen, last_seen) in enumerate(rows, start=1):
+        conn.execute(
+            """
+            insert into cie_records(record_id, session_id, window_id, extractor_version, family,
+              codebook_code, unit, statement, actor, source_reliability, info_credibility,
+              confidence, sensitivity, evidence_json, facets_json, assumptions_json,
+              alternatives_json, disconfirming_json, falsifiers_json, quote_verified, dedup_key,
+              occurrence_count, first_seen, last_seen, created_at)
+            values (?, 'fixture:s1', 'w', 'v', 'verification_review', 'verification_review',
+              'turn', ?, 'leon', 'A', 1, 'high', 'internal', ?, '{}', '[]', '[]', '[]', '[]',
+              1, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"manual-{idx}",
+                statement,
+                evidence,
+                dedup_key,
+                count,
+                first_seen,
+                last_seen,
+                first_seen,
+            ),
+        )
+    conn.commit()
+
+    summary = rekey_cie_record_dedup(conn)
+
+    row = conn.execute(
+        "select statement, occurrence_count, first_seen, last_seen, dedup_key from cie_records"
+    ).fetchone()
+    assert summary.rows_before == 2
+    assert summary.rows_after == 1
+    assert summary.total_occurrences_before == summary.total_occurrences_after == 5
+    assert row["occurrence_count"] == 5
+    assert row["first_seen"] == "2026-01-01 00:00:00"
+    assert row["last_seen"] == "2026-01-04 00:00:00"
+    assert row["statement"] == "Longer representative statement that should survive the merge"
+    assert row["dedup_key"].startswith("cie_dedup_v2_")
 
 
 def test_register_integrity_invalid_quotes_are_rejected_not_inserted(tmp_path):

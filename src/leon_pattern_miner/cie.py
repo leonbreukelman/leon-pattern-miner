@@ -627,6 +627,17 @@ def validate_cie_payload(
 
 
 _DEDUP_STRIP_RE = re.compile(r"^[\W_]+|[\W_]+$", re.UNICODE)
+DEDUP_MIN_PRIMARY_QUOTE_CHARS = 15
+
+
+@dataclass(frozen=True)
+class CIEDedupRekeySummary:
+    rows_before: int
+    rows_after: int
+    total_occurrences_before: int
+    total_occurrences_after: int
+    merged_groups: int
+    rows_collapsed: int
 
 
 def normalize_dedup_text(value: Any) -> str:
@@ -635,19 +646,46 @@ def normalize_dedup_text(value: Any) -> str:
     return _DEDUP_STRIP_RE.sub("", text)
 
 
-def cie_record_dedup_key(record: Mapping[str, Any]) -> str:
+def _normalized_evidence_quotes(record: Mapping[str, Any]) -> list[str]:
     evidence = record.get("evidence")
-    first_quote = ""
-    if isinstance(evidence, list) and evidence and isinstance(evidence[0], Mapping):
-        first_quote = str(evidence[0].get("quote") or "")
-    raw = "\x1f".join(
-        [
-            normalize_dedup_text(record.get("codebook_code")),
-            normalize_dedup_text(record.get("statement")),
-            normalize_dedup_text(first_quote),
-        ]
-    )
-    return "cie_dedup_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    if not isinstance(evidence, list):
+        return []
+    quotes: list[str] = []
+    for item in evidence:
+        if not isinstance(item, Mapping):
+            continue
+        quote = normalize_dedup_text(item.get("quote"))
+        if quote:
+            quotes.append(quote)
+    return quotes
+
+
+def _dedup_key_parts(record: Mapping[str, Any]) -> list[str]:
+    """Stable evidence-based identity parts for a CIE register finding."""
+    code = normalize_dedup_text(record.get("codebook_code"))
+    quotes = _normalized_evidence_quotes(record)
+    primary_quote = quotes[0] if quotes else ""
+    unique_quotes = sorted(set(quotes))
+    if len(unique_quotes) >= 2 and any(
+        len(quote) >= DEDUP_MIN_PRIMARY_QUOTE_CHARS for quote in unique_quotes
+    ):
+        return ["v2", "quote_set", code, json.dumps(unique_quotes, ensure_ascii=False)]
+
+    if len(primary_quote) >= DEDUP_MIN_PRIMARY_QUOTE_CHARS:
+        return ["v2", "primary_quote", code, primary_quote]
+
+    return [
+        "v2",
+        "weak_quote_statement_guard",
+        code,
+        primary_quote,
+        normalize_dedup_text(record.get("statement")),
+    ]
+
+
+def cie_record_dedup_key(record: Mapping[str, Any]) -> str:
+    raw = "\x1f".join(_dedup_key_parts(record))
+    return "cie_dedup_v2_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
 def _cie_record_columns(conn: sqlite3.Connection) -> set[str]:
@@ -671,7 +709,33 @@ def _record_from_row_for_dedup(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def _migrate_cie_record_dedup(conn: sqlite3.Connection) -> None:
+def _occurrence_count(row: sqlite3.Row) -> int:
+    value = row["occurrence_count"]
+    return int(value) if value is not None else 1
+
+
+def _nonempty_min(values: Iterable[Any]) -> str | None:
+    nonempty = [str(value) for value in values if value]
+    return min(nonempty) if nonempty else None
+
+
+def _nonempty_max(values: Iterable[Any]) -> str | None:
+    nonempty = [str(value) for value in values if value]
+    return max(nonempty) if nonempty else None
+
+
+def _representative_cie_record(group: list[sqlite3.Row]) -> sqlite3.Row:
+    return max(
+        group,
+        key=lambda row: (
+            len(str(row["statement"] or "")),
+            str(row["last_seen"] or row["created_at"] or ""),
+            str(row["record_id"] or ""),
+        ),
+    )
+
+
+def rekey_cie_record_dedup(conn: sqlite3.Connection) -> CIEDedupRekeySummary:
     _ensure_cie_record_column(conn, "dedup_key", "text")
     _ensure_cie_record_column(conn, "occurrence_count", "integer not null default 1")
     _ensure_cie_record_column(conn, "first_seen", "text")
@@ -686,15 +750,18 @@ def _migrate_cie_record_dedup(conn: sqlite3.Connection) -> None:
         order by coalesce(created_at, ''), record_id
         """
     ).fetchall()
+    rows_before = len(rows)
+    total_occurrences_before = sum(_occurrence_count(row) for row in rows)
+    conn.execute("drop index if exists idx_cie_records_dedup_key")
     grouped: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
         key = cie_record_dedup_key(_record_from_row_for_dedup(row))
         grouped.setdefault(key, []).append(row)
     for key, group in grouped.items():
-        keeper = group[0]
-        count = sum(int(row["occurrence_count"] or 1) for row in group)
-        first_seen = min(str(row["first_seen"] or row["created_at"] or "") for row in group)
-        last_seen = max(str(row["last_seen"] or row["created_at"] or "") for row in group)
+        keeper = _representative_cie_record(group)
+        count = sum(_occurrence_count(row) for row in group)
+        first_seen = _nonempty_min(row["first_seen"] or row["created_at"] for row in group)
+        last_seen = _nonempty_max(row["last_seen"] or row["created_at"] for row in group)
         conn.execute(
             """
             update cie_records
@@ -703,11 +770,35 @@ def _migrate_cie_record_dedup(conn: sqlite3.Connection) -> None:
             """,
             (key, count, first_seen or None, last_seen or None, keeper["record_id"]),
         )
-        for duplicate in group[1:]:
-            conn.execute("delete from cie_records where record_id=?", (duplicate["record_id"],))
+        for duplicate in group:
+            if duplicate["record_id"] != keeper["record_id"]:
+                conn.execute("delete from cie_records where record_id=?", (duplicate["record_id"],))
     conn.execute(
         "create unique index if not exists idx_cie_records_dedup_key on cie_records(dedup_key) where dedup_key is not null"
     )
+    rows_after = conn.execute("select count(*) from cie_records").fetchone()[0]
+    total_occurrences_after = conn.execute(
+        "select coalesce(sum(occurrence_count), 0) from cie_records"
+    ).fetchone()[0]
+    if int(total_occurrences_after or 0) != total_occurrences_before:
+        raise RuntimeError(
+            "cie_records dedup rekey changed occurrence total: "
+            f"before={total_occurrences_before} after={total_occurrences_after}"
+        )
+    summary = CIEDedupRekeySummary(
+        rows_before=rows_before,
+        rows_after=int(rows_after or 0),
+        total_occurrences_before=total_occurrences_before,
+        total_occurrences_after=int(total_occurrences_after or 0),
+        merged_groups=sum(1 for group in grouped.values() if len(group) > 1),
+        rows_collapsed=rows_before - int(rows_after or 0),
+    )
+    conn.commit()
+    return summary
+
+
+def _migrate_cie_record_dedup(conn: sqlite3.Connection) -> None:
+    rekey_cie_record_dedup(conn)
 
 
 def init_cie_tables(conn: sqlite3.Connection) -> None:

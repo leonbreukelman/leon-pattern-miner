@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 import statistics
@@ -265,6 +266,18 @@ def _record_for_output(record: dict[str, Any], *, window_id: str, family: str) -
     return out
 
 
+def _prompt_hash(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+
+
+def _append_trace(trace_path: Path | None, entry: Mapping[str, Any]) -> None:
+    if trace_path is None:
+        return
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    with trace_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+
+
 def _extract_session_predictions(
     session_payload: Mapping[str, Any],
     *,
@@ -277,6 +290,7 @@ def _extract_session_predictions(
     timeout: int,
     llm_max_tokens: int,
     pass_strategy: str,
+    trace_path: Path | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     session_id = str(session_payload.get("session_id") or "")
     turns = []
@@ -308,6 +322,20 @@ def _extract_session_predictions(
         for family in families:
             stats["window_passes"] += 1
             prompt_bundle = render_cie_prompt_bundle(window, family=family, max_prompt_tokens=max_prompt_tokens)
+            phash = _prompt_hash(prompt_bundle.prompt)
+            trace_entry: dict[str, Any] = {
+                "session_id": session_id,
+                "window_id": window.window_id,
+                "window_index": window.window_index,
+                "turn_start": window.turn_start,
+                "turn_end": window.turn_end,
+                "turn_indices": window.turn_indices,
+                "token_estimate": window.token_estimate,
+                "family": family,
+                "prompt_hash": phash,
+                "prompt": prompt_bundle.prompt,
+                "quote_source_turn_ids": sorted(prompt_bundle.quote_sources),
+            }
             try:
                 response = chat_func(
                     prompt_bundle.prompt,
@@ -328,12 +356,49 @@ def _extract_session_predictions(
                     quote_source_texts=prompt_bundle.quote_sources,
                 )
                 stats["records_rejected"] += len(rejected)
-                records.extend(
+                output_records = [
                     _record_for_output(record, window_id=window.window_id, family=family)
                     for record in valid
+                ]
+                evidence_rebindings = [
+                    {
+                        "record_index": idx,
+                        "codebook_code": record.get("codebook_code"),
+                        "statement": record.get("statement"),
+                        "rebindings": record.get("evidence_rebindings"),
+                    }
+                    for idx, record in enumerate(output_records)
+                    if record.get("evidence_rebindings")
+                ]
+                records.extend(output_records)
+                trace_entry.update(
+                    {
+                        "status": "processed",
+                        "response_json": payload,
+                        "raw_content": response.get("raw_content"),
+                        "raw_response": response.get("raw_response"),
+                        "request_payload": response.get("request_payload"),
+                        "usage": response.get("usage"),
+                        "model_ids": response_model_ids,
+                        "masked_hits": response.get("masked_hits"),
+                        "accepted_records": output_records,
+                        "rejected_records": rejected,
+                        "evidence_rebindings": evidence_rebindings,
+                        "records_created": len(output_records),
+                        "records_rejected": len(rejected),
+                    }
                 )
-            except Exception:
+            except Exception as exc:
                 stats["errors"] += 1
+                trace_entry.update(
+                    {
+                        "status": "error",
+                        "error_type": type(exc).__name__,
+                        "error_detail": str(exc),
+                    }
+                )
+            finally:
+                _append_trace(trace_path, trace_entry)
     return records, stats
 
 
@@ -409,6 +474,7 @@ def run_candidate(
     threshold: float | None = None,
     served_model_ids: list[str] | None = None,
     provider_usage: Callable[[], Mapping[str, Any]] | None = None,
+    trace_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run a candidate model over frozen sessions and write predictions + scorecards."""
     if pass_strategy not in {"per_family", "combined"}:
@@ -416,6 +482,9 @@ def run_candidate(
     output_root = Path(output_dir)
     integrity = assert_dataset_integrity(dataset)
     output_root.mkdir(parents=True, exist_ok=True)
+    trace_root = Path(trace_dir) if trace_dir is not None else None
+    if trace_root is not None:
+        trace_root.mkdir(parents=True, exist_ok=True)
     max_window_tokens, overlap_tokens = _resolved_window_params(
         dataset,
         max_window_tokens=max_window_tokens,
@@ -429,6 +498,7 @@ def run_candidate(
         run_dir = output_root / f"run_{run_idx:02d}"
         pred_dir = run_dir / "predictions"
         pred_dir.mkdir(parents=True, exist_ok=True)
+        run_trace_path = trace_root / f"run_{run_idx:02d}" / "window-traces.jsonl" if trace_root else None
         session_stats: dict[str, Any] = {}
         for session_id, session_payload in dataset.sessions.items():
             records, stats = _extract_session_predictions(
@@ -442,6 +512,7 @@ def run_candidate(
                 timeout=timeout,
                 llm_max_tokens=llm_max_tokens,
                 pass_strategy=pass_strategy,
+                trace_path=run_trace_path,
             )
             stem = dataset.file_by_session.get(session_id, session_id.replace(":", "__"))
             (pred_dir / f"{stem}.json").write_text(
@@ -495,6 +566,8 @@ def run_candidate(
         "summary": _summarise_runs(run_scores),
         "artifacts": run_details,
     }
+    if trace_root is not None:
+        result["trace_dir"] = str(trace_root)
     if provider_usage_payload is not None:
         result["provider_usage"] = provider_usage_payload
     if threshold is not None:

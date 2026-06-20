@@ -90,6 +90,9 @@ def test_run_candidate_with_fake_chat_writes_predictions_and_scorecard(tmp_path)
         "falsifiers": [],
         "quote_verified": True,
     }
+    invalid_record = dict(gold_record)
+    invalid_record["codebook_code"] = "methodology_workflow"
+    invalid_record["statement"] = "This code is intentionally invalid for the prompted family."
     (root / "gold" / "s1.json").write_text(json.dumps({"session_id": "s1", "extractor": "gold", "records": [gold_record]}))
     (root / "baseline_qwen" / "s1.json").write_text(json.dumps({"session_id": "s1", "extractor": "baseline", "records": []}))
 
@@ -101,7 +104,7 @@ def test_run_candidate_with_fake_chat_writes_predictions_and_scorecard(tmp_path)
         seen_prompts.append(prompt)
         seen["model"] = model
         seen["base_url"] = base_url
-        return {"json": {"records": [gold_record]}, "model_ids": ["fake-model"]}
+        return {"json": {"records": [gold_record, invalid_record]}, "model_ids": ["fake-model"]}
 
     dataset = load_dataset(root)
     result = run_candidate(
@@ -114,6 +117,7 @@ def test_run_candidate_with_fake_chat_writes_predictions_and_scorecard(tmp_path)
         timeout=1,
         llm_max_tokens=100,
         threshold=1.0,
+        trace_dir=tmp_path / "traces",
     )
 
     assert seen["model"] == "fake-model"
@@ -135,6 +139,18 @@ def test_run_candidate_with_fake_chat_writes_predictions_and_scorecard(tmp_path)
     assert "agreement-with-Opus" in scorecard
     assert "4090 is not run-to-run deterministic" in scorecard
     assert "transport error-window rate" in scorecard
+    trace_path = tmp_path / "traces" / "run_01" / "window-traces.jsonl"
+    traces = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    assert traces
+    assert traces[0]["prompt"].startswith("You are doing CIE v1 candidate discovery")
+    assert any(
+        trace["response_json"]["records"][0]["codebook_code"] == "authorization_limit"
+        for trace in traces
+    )
+    accepted = [record for trace in traces for record in trace["accepted_records"]]
+    rejected = [record for trace in traces for record in trace["rejected_records"]]
+    assert accepted[0]["codebook_code"] == "authorization_limit"
+    assert any(item["reason"] == "code_not_allowed" for item in rejected)
 
 
 def test_run_candidate_scorecard_surfaces_transport_failures(tmp_path):

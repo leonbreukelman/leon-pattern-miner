@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -13,54 +11,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from leon_pattern_miner.adapters import AdapterConfig, diffusion_cli_preflight, get_adapter
 from leon_pattern_miner.benchmark import default_result_dir, estimate_candidate_prompt_count, load_dataset, run_candidate
 from leon_pattern_miner.llm import ProviderCallBudget, planned_provider_call_ceiling
+from leon_pattern_miner.provider_runtime import (
+    DEFAULT_LOCAL_BASE_URL,
+    DEFAULT_XAI_BASE_URL,
+    load_env_file,
+    model_ids_from_preflight,
+    preflight_openai_models,
+    strip_v1,
+    unquote_env_value,
+)
 
-DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8080/v1"
-
-
-def _strip_v1(base_url: str) -> str:
-    base = base_url.rstrip("/")
-    return base[:-3] if base.endswith("/v1") else base
-
-
-def _preflight(base_url: str, timeout: int = 5, *, api_key_env: str | None = None) -> dict:
-    root = _strip_v1(base_url)
-    headers = {}
-    if api_key_env:
-        api_key = os.environ.get(api_key_env)
-        if not api_key:
-            raise RuntimeError(f"missing API key env {api_key_env}")
-        headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(f"{root}/v1/models", headers=headers, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8", errors="replace"))
-
-
-def _unquote_env_value(value: str) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
-
-
-def _load_env_file(path: str | Path) -> list[str]:
-    """Load simple KEY=VALUE entries without overriding existing environment."""
-    env_path = Path(path)
-    if not env_path.exists():
-        return []
-    loaded: list[str] = []
-    for raw_line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].lstrip()
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if not key or key in os.environ:
-            continue
-        os.environ[key] = _unquote_env_value(value)
-        loaded.append(key)
-    return loaded
+_strip_v1 = strip_v1
+_preflight = preflight_openai_models
+_unquote_env_value = unquote_env_value
+_load_env_file = load_env_file
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,6 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pass-strategy", choices=["per_family", "combined"], default="per_family")
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--trace-dir",
+        default=None,
+        help="Optional local-only JSONL trace dir with rendered prompts, raw responses, and validation rejections.",
+    )
     parser.add_argument("--max-window-tokens", type=int, default=None)
     parser.add_argument("--overlap-tokens", type=int, default=None)
     parser.add_argument("--max-prompt-tokens", type=int, default=7600)
@@ -110,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.runs < 1:
         raise SystemExit("--runs must be >= 1")
     if args.adapter == "xai" and args.base_url == DEFAULT_LOCAL_BASE_URL:
-        args.base_url = "https://api.x.ai/v1"
+        args.base_url = DEFAULT_XAI_BASE_URL
     if args.adapter == "xai":
         _load_env_file(args.env_file)
 
@@ -169,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             label = "xAI" if args.adapter == "xai" else "local model"
             print(f"ERROR: {label} endpoint is not reachable at {args.base_url}: {exc}", file=sys.stderr)
             return 2
-        ids = [str(item.get("id")) for item in models.get("data", []) if isinstance(item, dict)]
+        ids = model_ids_from_preflight(models)
         print("preflight: endpoint OK", ", ".join(ids[:5]) if ids else "(no model ids reported)")
         if ids and args.model not in ids:
             print(
@@ -215,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         threshold=args.threshold,
         served_model_ids=ids,
         provider_usage=provider_usage_func,
+        trace_dir=args.trace_dir,
     )
     out = {"scorecard": str(output_dir / "scorecard.md"), "summary": result["summary"]}
     if "provider_usage" in result:

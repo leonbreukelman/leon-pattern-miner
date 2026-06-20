@@ -13,6 +13,9 @@ class IngestResult:
     sessions_ingested: int = 0
     turns_ingested: int = 0
     errors: int = 0
+    selected_sessions: int = 0
+    session_ids: tuple[str, ...] = ()
+    max_started_at: float | None = None
 
 
 def _hash_bytes(data: bytes) -> str:
@@ -110,11 +113,12 @@ def _store_messages(
     fmt: str,
     messages: list[dict[str, Any]],
     content_hash: str,
+    started_at: float | None = None,
 ) -> IngestResult:
     conn.execute("delete from turns where session_id=?", (sid,))
     conn.execute(
-        "insert or replace into sessions(session_id, source_path, format, turn_count, content_hash, status, error_detail) values (?, ?, ?, ?, ?, 'normalized', null)",
-        (sid, source_path, fmt, len(messages), content_hash),
+        "insert or replace into sessions(session_id, source_path, format, turn_count, content_hash, started_at, status, error_detail) values (?, ?, ?, ?, ?, ?, 'normalized', null)",
+        (sid, source_path, fmt, len(messages), content_hash, started_at),
     )
     cursor = 0
     inserted = 0
@@ -138,7 +142,13 @@ def _store_messages(
         inserted += 1
     conn.execute("update sessions set turn_count=? where session_id=?", (inserted, sid))
     conn.commit()
-    return IngestResult(sessions_ingested=1, turns_ingested=inserted)
+    return IngestResult(
+        sessions_ingested=1,
+        turns_ingested=inserted,
+        selected_sessions=1,
+        session_ids=(sid,),
+        max_started_at=started_at,
+    )
 
 
 def ingest_path(conn: sqlite3.Connection, path: str | Path, *, session_id: str | None = None) -> IngestResult:
@@ -169,6 +179,7 @@ def ingest_hermes_state_db(
     state_db_path: str | Path,
     *,
     limit: int = 20,
+    after_started_at: float | None = None,
     exclude_substring: str = "leon-pattern-miner,leon pattern miner,pattern miner,pattern-miner,conversation miner,conversation mining,conversation-mining,pilot-00,local conversation mining",
 ) -> IngestResult:
     """Ingest recent Hermes sessions directly from ~/.hermes/state.db.
@@ -183,22 +194,31 @@ def ingest_hermes_state_db(
     message_cols = {row["name"] for row in source.execute("pragma table_info(messages)")}
     cwd_expr = "coalesce(cwd, '')" if "cwd" in session_cols else "''"
     active_filter = "and active=1" if "active" in message_cols else ""
+    params: tuple[Any, ...] = ()
+    cursor_filter = ""
+    if after_started_at is not None:
+        cursor_filter = "and started_at > ?"
+        params = (after_started_at,)
     rows = source.execute(
         f"""
         select id, source, coalesce(title, '') as title, {cwd_expr} as cwd,
                started_at, message_count
         from sessions
         where message_count > 0
+        {cursor_filter}
         order by started_at desc
-        """
+        """,
+        params,
     ).fetchall()
     ingested = turns = errors = 0
+    selected_session_ids: list[str] = []
+    selected_started: list[float] = []
     exclude_terms = [term.strip().lower() for term in exclude_substring.split(",") if term.strip()]
     for sess in rows:
         haystack = "\n".join(str(sess[k] or "") for k in sess.keys()).lower()
         if any(term in haystack for term in exclude_terms):
             continue
-        if limit > 0 and ingested >= limit:
+        if limit > 0 and len(selected_session_ids) >= limit:
             break
         messages = []
         for msg in source.execute(
@@ -227,8 +247,13 @@ def ingest_hermes_state_db(
             json.dumps(messages, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest()
         sid = f"hermes:{sess['id']}"
+        started_at = float(sess["started_at"])
+        selected_session_ids.append(sid)
+        selected_started.append(started_at)
         existing = conn.execute("select content_hash from sessions where session_id=?", (sid,)).fetchone()
         if existing and existing["content_hash"] == content_hash:
+            conn.execute("update sessions set started_at=? where session_id=?", (started_at, sid))
+            conn.commit()
             continue
         try:
             result = _store_messages(
@@ -238,6 +263,7 @@ def ingest_hermes_state_db(
                 fmt="hermes_state_db",
                 messages=messages,
                 content_hash=content_hash,
+                started_at=started_at,
             )
             ingested += result.sessions_ingested
             turns += result.turns_ingested
@@ -249,4 +275,11 @@ def ingest_hermes_state_db(
             )
             conn.commit()
     source.close()
-    return IngestResult(sessions_ingested=ingested, turns_ingested=turns, errors=errors)
+    return IngestResult(
+        sessions_ingested=ingested,
+        turns_ingested=turns,
+        errors=errors,
+        selected_sessions=len(selected_session_ids),
+        session_ids=tuple(selected_session_ids),
+        max_started_at=max(selected_started) if selected_started else None,
+    )

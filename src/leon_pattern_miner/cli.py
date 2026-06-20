@@ -8,7 +8,8 @@ from .db import connect, init_db
 from .extractors import DETERMINISTIC_EXTRACTOR_VERSION, run_deterministic_extractors
 from .ingest import ingest_hermes_state_db, ingest_path
 from .llm import health as llm_health
-from .report import write_pilot_report
+from .mine import run_mine_cycle, write_schedule_templates
+from .report import write_findings_report, write_pilot_report
 from .runner import approve_pilot, enqueue_work, reset_stale_running_work, status_snapshot
 
 DEFAULT_DB = Path("runtime/miner.db")
@@ -76,8 +77,47 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     conn = _conn(args.db)
-    report = write_pilot_report(conn, args.output, run_id=args.run_id, include_quotes=args.include_quotes)
+    if args.pilot:
+        report = write_pilot_report(conn, args.output, run_id=args.run_id, include_quotes=args.include_quotes)
+    else:
+        from .cie import init_cie_tables
+
+        init_cie_tables(conn)
+        report = write_findings_report(conn, args.output, limit_per_family=args.limit_per_family)
     print(json.dumps({"report": str(report)}, indent=2))
+    return 0
+
+
+def cmd_mine(args: argparse.Namespace) -> int:
+    conn = _conn(args.db)
+    result = run_mine_cycle(
+        conn,
+        state_db=args.state_db,
+        limit=args.limit,
+        extractor_version=args.extractor_version,
+        model=args.model,
+        base_url=args.base_url,
+        xai_api_key_env=args.xai_api_key_env,
+        xai_reasoning_effort=args.xai_reasoning_effort,
+        pass_strategy=args.pass_strategy,
+        max_window_tokens=args.max_window_tokens,
+        overlap_tokens=args.overlap_tokens,
+        max_prompt_tokens=args.max_prompt_tokens,
+        timeout=args.timeout,
+        llm_max_tokens=args.llm_max_tokens,
+        cost_cap_usd=args.cost_cap_usd,
+        max_model_calls=args.max_model_calls,
+        env_file=args.env_file,
+        no_preflight=args.no_preflight,
+        report_path=args.report,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_schedule_template(args: argparse.Namespace) -> int:
+    paths = write_schedule_templates(args.output_dir, mine_command=args.mine_command)
+    print(json.dumps({"schedule_templates": [str(path) for path in paths], "enabled": False}, indent=2))
     return 0
 
 
@@ -132,9 +172,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     report = sub.add_parser("report")
     report.add_argument("--run-id", default="pilot-001")
-    report.add_argument("--output", type=Path, default=Path("reports/pilot-001.md"))
+    report.add_argument("--output", type=Path, default=Path("runtime/findings-report.md"))
     report.add_argument("--include-quotes", action="store_true")
+    report.add_argument("--limit-per-family", type=int, default=None)
+    report.add_argument("--pilot", action="store_true", help="Write the retired deterministic pilot report instead of the CIE findings register report")
     report.set_defaults(func=cmd_report)
+
+    mine = sub.add_parser("mine")
+    mine.add_argument("--state-db", type=Path, default=Path.home() / ".hermes" / "state.db")
+    mine.add_argument("--limit", type=int, default=20)
+    mine.add_argument("--extractor-version", default="cie-v1-qwen3.6-opus-fewshot-20260612")
+    mine.add_argument("--model", default="grok-4.3")
+    mine.add_argument("--base-url", default="https://api.x.ai/v1")
+    mine.add_argument("--xai-api-key-env", default="XAI_API_KEY")
+    mine.add_argument("--xai-reasoning-effort", choices=["none", "low", "medium", "high"], default="high")
+    mine.add_argument("--pass-strategy", choices=["per_family", "combined"], default="per_family")
+    mine.add_argument("--max-window-tokens", type=int, default=3500)
+    mine.add_argument("--overlap-tokens", type=int, default=600)
+    mine.add_argument("--max-prompt-tokens", type=int, default=7600)
+    mine.add_argument("--timeout", type=int, default=600)
+    mine.add_argument("--llm-max-tokens", type=int, default=4096)
+    mine.add_argument("--cost-cap-usd", type=float, default=10.0)
+    mine.add_argument("--max-model-calls", type=int, default=None)
+    mine.add_argument("--env-file", default=".env")
+    mine.add_argument("--no-preflight", action="store_true")
+    mine.add_argument("--report", type=Path, default=Path("runtime/findings-report.md"))
+    mine.set_defaults(func=cmd_mine)
+
+    schedule = sub.add_parser("schedule-template")
+    schedule.add_argument("--output-dir", type=Path, default=Path("runtime/schedule"))
+    schedule.add_argument(
+        "--mine-command",
+        default="cd /path/to/leon-pattern-miner && uv run miner --db runtime/miner.db mine --limit 20 --cost-cap-usd 10 --xai-reasoning-effort high --pass-strategy per_family --report runtime/findings-report.md",
+    )
+    schedule.set_defaults(func=cmd_schedule_template)
 
     approve = sub.add_parser("approve-pilot")
     approve.add_argument("--run-id", required=True)

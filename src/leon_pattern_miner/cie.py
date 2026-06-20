@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
-from .llm import chat_json
+from .llm import ProviderBudgetExceeded, chat_json
 from .sensitivity import mask_sensitive, sensitivity_for_text
 
 DEFAULT_CIE_EXTRACTOR_VERSION = "cie-v1-qwen3.6-opus-fewshot-20260612"
@@ -110,6 +110,7 @@ class CIERunSummary:
     no_signal_windows: int = 0
     pass_strategy: str = "per_family"
     no_signal_windows_diagnostic: bool = True
+    budget_exhausted: bool = False
 
 
 def _as_dict(row: Mapping[str, Any] | sqlite3.Row) -> dict[str, Any]:
@@ -259,6 +260,8 @@ def _few_shots_for_family(family: str, codebook: dict[str, Any], *, limit: int =
     allowed = allowed_codes_for_family(family, codebook)
     if family == "all":
         limit = 5
+    elif family == "outcome_attribution":
+        limit = 9
     examples = []
     for shot in codebook.get("few_shots", []):
         if shot.get("codebook_code") in allowed or shot.get("source_family") == family:
@@ -374,6 +377,9 @@ def render_cie_prompt_bundle(
         "7. unit must be turn, exchange, arc, or session; cross_session is forbidden here.",
         "8. Include assumptions, alternatives, falsifiers, and confidence_basis for each record.",
         "9. For outcome_attribution codes (intent_stated, delivery_result, rework_cause), populate facets: delivery ∈ {landed, partial, rework, failed, unknown} and cause ∈ {leon_instruction, agent, tool, environment, none}; intent_stated uses delivery=unknown and cause=none; rework_cause requires a non-none cause and a partial/rework/failed delivery. Records with missing or invalid facets are rejected.",
+        "10. For shortfall arcs, emit delivery_result with delivery=partial|rework|failed when transcript evidence shows the work did not land, needed redo/rework, or failed; do not skip non-landed delivery_result just because the cause is implicit.",
+        "11. When delivery_result is partial|rework|failed, attempt a rework_cause only if a turn provides evidence of why: Leon correction/reversal/ambiguity, agent admission of wrong target/path, or tool/CI/environment error. rework_cause evidence MAY combine multiple quotes: the shortfall quote and the cause quote.",
+        "12. If no cause evidence exists, omit rework_cause; do not invent a cause. It is acceptable to emit delivery_result alone with cause=none when the shortfall is grounded but the cause is not.",
         "Output schema:",
         json.dumps(payload_schema, ensure_ascii=False),
         "Window turns:",
@@ -435,6 +441,61 @@ def _reject(reason: str, record: Any) -> dict[str, Any]:
     return {"reason": reason, "record": record}
 
 
+def _quote_resolution_sources(
+    source_turns_by_id: Mapping[str, Mapping[str, Any]],
+    quote_sources_by_id: Mapping[str, str] | None,
+) -> dict[str, str]:
+    """Return the exact text surface used for quote validation by turn id.
+
+    When prompt-visible quote sources are supplied, keep using that stricter surface;
+    otherwise fall back to the raw turn text. This preserves the fabrication guard:
+    every quote must still be a verbatim substring of a real window turn.
+    """
+    sources: dict[str, str] = {}
+    for turn_id, source in source_turns_by_id.items():
+        if quote_sources_by_id is not None and turn_id in quote_sources_by_id:
+            sources[turn_id] = str(quote_sources_by_id[turn_id])
+        else:
+            sources[turn_id] = str(source.get("text") or "")
+    return sources
+
+
+def _resolve_evidence_turn_id(
+    *,
+    cited_turn_id: Any,
+    quote: Any,
+    source_turns_by_id: Mapping[str, Mapping[str, Any]],
+    quote_sources_by_id: Mapping[str, str] | None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Resolve a cited evidence turn id by exact quote match.
+
+    If the cited id is missing or the quote is not present in it, search the
+    window for the same verbatim quote and rebind only when the quote exists in
+    at least one real turn. Zero matches remains quote_not_found.
+    """
+    if not isinstance(quote, str) or not quote:
+        return None, None
+    turn_key = str(cited_turn_id)
+    quote_sources = _quote_resolution_sources(source_turns_by_id, quote_sources_by_id)
+    cited_source = quote_sources.get(turn_key)
+    if cited_source is not None and quote in cited_source:
+        return turn_key, None
+
+    matches = [candidate_turn_id for candidate_turn_id, text in quote_sources.items() if quote in text]
+    if not matches:
+        return None, None
+    resolved_turn_id = matches[0]
+    reason = "turn_id_not_found" if turn_key not in source_turns_by_id else "quote_not_in_cited_turn"
+    return resolved_turn_id, {
+        "cited_turn_id": turn_key,
+        "resolved_turn_id": resolved_turn_id,
+        "quote": quote,
+        "reason": reason,
+        "match_count": len(matches),
+        "ambiguous": len(matches) > 1,
+    }
+
+
 def validate_cie_payload(
     payload: Mapping[str, Any],
     source_turns: Mapping[str, Mapping[str, Any]],
@@ -487,29 +548,32 @@ def validate_cie_payload(
             continue
         quote_ok = True
         actors = set()
+        resolved_evidence: list[dict[str, Any]] = []
+        evidence_rebindings: list[dict[str, Any]] = []
         for item in evidence:
             if not isinstance(item, dict):
                 quote_ok = False
                 rejected.append(_reject("evidence_not_object", record))
                 break
             turn_id = item.get("turn_id")
-            turn_key = str(turn_id)
             quote = item.get("quote")
-            if turn_key not in source_turns_by_id:
-                quote_ok = False
-                rejected.append(_reject("turn_id_not_found", record))
-                break
-            source = source_turns_by_id[turn_key]
-            actors.add(source.get("actor"))
-            quote_source = (
-                str(quote_sources_by_id[turn_key])
-                if quote_sources_by_id is not None and turn_key in quote_sources_by_id
-                else str(source.get("text") or "")
+            resolved_turn_id, rebind = _resolve_evidence_turn_id(
+                cited_turn_id=turn_id,
+                quote=quote,
+                source_turns_by_id=source_turns_by_id,
+                quote_sources_by_id=quote_sources_by_id,
             )
-            if not isinstance(quote, str) or not quote or quote not in quote_source:
+            if resolved_turn_id is None:
                 quote_ok = False
                 rejected.append(_reject("quote_not_found", record))
                 break
+            source = source_turns_by_id[resolved_turn_id]
+            actors.add(source.get("actor"))
+            resolved_item = dict(item)
+            resolved_item["turn_id"] = resolved_turn_id
+            resolved_evidence.append(resolved_item)
+            if rebind is not None:
+                evidence_rebindings.append(rebind)
         if not quote_ok:
             continue
         if code == "model_routing":
@@ -543,6 +607,9 @@ def validate_cie_payload(
             rejected.append(_reject("source_reliability_a_without_direct_source", record))
             continue
         clean = dict(record)
+        clean["evidence"] = resolved_evidence
+        if evidence_rebindings:
+            clean["evidence_rebindings"] = evidence_rebindings
         clean["info_credibility"] = cred
         clean["confidence"] = _normalize_confidence(clean.get("confidence"))
         clean.setdefault("facets", {})
@@ -557,6 +624,90 @@ def validate_cie_payload(
             continue
         valid.append(clean)
     return valid, rejected
+
+
+_DEDUP_STRIP_RE = re.compile(r"^[\W_]+|[\W_]+$", re.UNICODE)
+
+
+def normalize_dedup_text(value: Any) -> str:
+    """Exact-normalized text for register identity: lowercase, collapsed whitespace, edge punctuation."""
+    text = re.sub(r"\s+", " ", str(value or "").lower()).strip()
+    return _DEDUP_STRIP_RE.sub("", text)
+
+
+def cie_record_dedup_key(record: Mapping[str, Any]) -> str:
+    evidence = record.get("evidence")
+    first_quote = ""
+    if isinstance(evidence, list) and evidence and isinstance(evidence[0], Mapping):
+        first_quote = str(evidence[0].get("quote") or "")
+    raw = "\x1f".join(
+        [
+            normalize_dedup_text(record.get("codebook_code")),
+            normalize_dedup_text(record.get("statement")),
+            normalize_dedup_text(first_quote),
+        ]
+    )
+    return "cie_dedup_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _cie_record_columns(conn: sqlite3.Connection) -> set[str]:
+    return {row["name"] for row in conn.execute("pragma table_info(cie_records)")}
+
+
+def _ensure_cie_record_column(conn: sqlite3.Connection, column: str, ddl: str) -> None:
+    if column not in _cie_record_columns(conn):
+        conn.execute(f"alter table cie_records add column {column} {ddl}")
+
+
+def _record_from_row_for_dedup(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        evidence = json.loads(row["evidence_json"] or "[]")
+    except json.JSONDecodeError:
+        evidence = []
+    return {
+        "codebook_code": row["codebook_code"],
+        "statement": row["statement"],
+        "evidence": evidence,
+    }
+
+
+def _migrate_cie_record_dedup(conn: sqlite3.Connection) -> None:
+    _ensure_cie_record_column(conn, "dedup_key", "text")
+    _ensure_cie_record_column(conn, "occurrence_count", "integer not null default 1")
+    _ensure_cie_record_column(conn, "first_seen", "text")
+    _ensure_cie_record_column(conn, "last_seen", "text")
+    rows = conn.execute(
+        """
+        select record_id, codebook_code, statement, evidence_json, created_at,
+               coalesce(occurrence_count, 1) as occurrence_count,
+               coalesce(first_seen, created_at) as first_seen,
+               coalesce(last_seen, created_at) as last_seen
+        from cie_records
+        order by coalesce(created_at, ''), record_id
+        """
+    ).fetchall()
+    grouped: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        key = cie_record_dedup_key(_record_from_row_for_dedup(row))
+        grouped.setdefault(key, []).append(row)
+    for key, group in grouped.items():
+        keeper = group[0]
+        count = sum(int(row["occurrence_count"] or 1) for row in group)
+        first_seen = min(str(row["first_seen"] or row["created_at"] or "") for row in group)
+        last_seen = max(str(row["last_seen"] or row["created_at"] or "") for row in group)
+        conn.execute(
+            """
+            update cie_records
+            set dedup_key=?, occurrence_count=?, first_seen=?, last_seen=?
+            where record_id=?
+            """,
+            (key, count, first_seen or None, last_seen or None, keeper["record_id"]),
+        )
+        for duplicate in group[1:]:
+            conn.execute("delete from cie_records where record_id=?", (duplicate["record_id"],))
+    conn.execute(
+        "create unique index if not exists idx_cie_records_dedup_key on cie_records(dedup_key) where dedup_key is not null"
+    )
 
 
 def init_cie_tables(conn: sqlite3.Connection) -> None:
@@ -605,6 +756,10 @@ def init_cie_tables(conn: sqlite3.Connection) -> None:
             falsifiers_json text not null,
             quote_verified integer not null default 1,
             prompt_hash text,
+            dedup_key text,
+            occurrence_count integer not null default 1,
+            first_seen text,
+            last_seen text,
             created_at text default (datetime('now'))
         )
         """
@@ -626,6 +781,7 @@ def init_cie_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    _migrate_cie_record_dedup(conn)
     conn.commit()
 
 
@@ -698,6 +854,23 @@ def _insert_records(
     inserted = 0
     for record in records:
         rid = _record_id(window.session_id, window.window_id, record)
+        dedup_key = cie_record_dedup_key(record)
+        existing = conn.execute(
+            "select record_id from cie_records where dedup_key=?",
+            (dedup_key,),
+        ).fetchone()
+        if existing is not None:
+            if existing["record_id"] != rid:
+                conn.execute(
+                    """
+                    update cie_records
+                    set occurrence_count=occurrence_count + 1,
+                        last_seen=datetime('now')
+                    where dedup_key=?
+                    """,
+                    (dedup_key,),
+                )
+            continue
         evidence_json = _json(record["evidence"])
         sensitivity = str(record.get("sensitivity") or sensitivity_for_text(record.get("statement", "")))
         cur = conn.execute(
@@ -706,8 +879,9 @@ def _insert_records(
                 record_id, session_id, window_id, extractor_version, family, codebook_code, unit,
                 statement, actor, source_reliability, info_credibility, confidence, confidence_basis,
                 sensitivity, evidence_json, facets_json, assumptions_json, alternatives_json,
-                disconfirming_json, falsifiers_json, quote_verified, prompt_hash
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                disconfirming_json, falsifiers_json, quote_verified, prompt_hash,
+                dedup_key, occurrence_count, first_seen, last_seen
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1, datetime('now'), datetime('now'))
             """,
             (
                 rid,
@@ -731,6 +905,7 @@ def _insert_records(
                 _json(record.get("disconfirming_evidence", [])),
                 _json(record.get("falsifiers", [])),
                 prompt_hash,
+                dedup_key,
             ),
         )
         inserted += cur.rowcount
@@ -816,6 +991,45 @@ def _already_processed(
         (window_id, extractor_version, family),
     ).fetchone()
     return row is not None
+
+
+def estimate_corpus_prompt_count(
+    conn: sqlite3.Connection,
+    *,
+    extractor_version: str = DEFAULT_CIE_EXTRACTOR_VERSION,
+    session_ids: list[str] | tuple[str, ...] | None = None,
+    max_sessions: int | None = None,
+    max_window_tokens: int = DEFAULT_MAX_WINDOW_TOKENS,
+    overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
+    pass_strategy: str = "per_family",
+    resume: bool = True,
+) -> int:
+    """Estimate corpus CIE prompts using the same windows/families/idempotency as run_cie_harness."""
+    if session_ids is None:
+        sql = "select session_id from sessions where status in ('normalized','extracted','verified') order by session_id"
+        params: tuple[Any, ...] = ()
+        if max_sessions is not None:
+            sql += " limit ?"
+            params = (max_sessions,)
+        session_ids = [row["session_id"] for row in conn.execute(sql, params).fetchall()]
+    elif max_sessions is not None:
+        session_ids = list(session_ids)[:max_sessions]
+    prompts = 0
+    for session_id in session_ids:
+        turns = _session_rows(conn, str(session_id))
+        if not turns:
+            continue
+        windows = build_session_windows(
+            turns,
+            max_window_tokens=max_window_tokens,
+            overlap_tokens=overlap_tokens,
+        )
+        for window in windows:
+            for family in families_for_pass_strategy(window, pass_strategy):
+                if resume and _already_processed(conn, window.window_id, extractor_version, family):
+                    continue
+                prompts += 1
+    return prompts
 
 
 def run_cie_harness(
@@ -939,6 +1153,20 @@ def run_cie_harness(
                     counters["records_rejected"] += len(rejected)
                     counters["window_runs"] += 1
                     conn.commit()
+                except ProviderBudgetExceeded as exc:
+                    _insert_window_run(
+                        conn,
+                        window,
+                        extractor_version=extractor_version,
+                        family=family,
+                        status="budget_exhausted",
+                        error_detail=str(exc)[:1000],
+                        prompt_hash=phash,
+                    )
+                    counters["budget_exhausted"] = True
+                    counters["window_runs"] += 1
+                    conn.commit()
+                    return CIERunSummary(**counters)
                 except Exception as exc:  # pragma: no cover - live failure path tested by smoke scripts
                     _insert_window_run(
                         conn,

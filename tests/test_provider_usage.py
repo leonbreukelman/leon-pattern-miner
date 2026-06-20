@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from leon_pattern_miner.adapters import AdapterConfig, make_xai_adapter
 from leon_pattern_miner.benchmark import load_dataset, run_candidate
 from leon_pattern_miner.llm import (
     OpenAIProviderConfig,
@@ -170,6 +171,20 @@ def test_chat_json_provider_records_usage_for_http_success_parse_failed_retry(mo
     assert budget.samples[0]["json_parse_ok"] is False
     assert budget.samples[0]["attempt"] == 1
     assert budget.samples[1]["json_parse_ok"] is True
+
+
+def test_xai_adapter_treats_reasoning_effort_none_as_disabled():
+    captured = {}
+
+    def fake_provider(prompt, *, config, **kwargs):
+        captured["prompt"] = prompt
+        captured["reasoning_effort"] = config.reasoning_effort
+        return {"json": {"records": []}}
+
+    chat = make_xai_adapter(AdapterConfig(provider_chat_func=fake_provider, xai_reasoning_effort="none"))
+
+    assert chat("prompt")["json"] == {"records": []}
+    assert captured == {"prompt": "prompt", "reasoning_effort": None}
 
 
 def test_provider_budget_cost_cap_blocks_next_call_after_breach():

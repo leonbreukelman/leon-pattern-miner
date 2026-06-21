@@ -25,6 +25,97 @@ SOURCE_RELIABILITY = {"A", "B", "C", "D", "E", "F"}
 UNITS = {"turn", "exchange", "arc", "session"}
 CONFIDENCE = {"low", "medium", "high"}
 
+PLATFORM_PRIMARY_EVIDENCE_EXACT_DENYLIST = {
+    "tool_iteration_limit_notice": (
+        "You've reached the maximum number of tool-calling iterations allowed. Please provide a "
+        "final response summarizing what you've found and accomplished so far, without calling "
+        "any more tools."
+    ),
+    "voice_input_concision_note": (
+        "[Voice input — respond concisely and conversationally, 2-3 sentences max. "
+        "No code blocks or markdown.]"
+    ),
+}
+
+PLATFORM_PRIMARY_EVIDENCE_REGEX_DENYLIST = (
+    (
+        "tool_loop_warning_repeated_exact",
+        re.compile(
+            r"\[Tool loop warning: repeated_exact_failure_warning; count=\d+; "
+            r"[A-Za-z0-9_]+ has failed \d+ times with identical arguments\. "
+            r"This looks like a loop; inspect the error and change strategy instead of "
+            r"retrying it unchanged\.\]"
+        ),
+    ),
+    (
+        "tool_loop_warning_same_tool_failure",
+        re.compile(
+            r"\[Tool loop warning: same_tool_failure_warning; count=\d+; "
+            r"[A-Za-z0-9_]+ has failed \d+ times this turn\. This looks like a loop\. "
+            r"Do not switch to text-only replies; keep using tools, but diagnose before "
+            r"retrying\. First inspect the latest error/output and verify your assumptions\. "
+            r"For terminal failures, run a small diagnostic such as `pwd && ls -la` in the "
+            r"same tool, then try an absolute path, a simpler command, a different working "
+            r"directory, or a different tool such as read_file/write_file/patch\.\]"
+        ),
+    ),
+    (
+        "tool_loop_warning_idempotent_no_progress",
+        re.compile(
+            r"\[Tool loop warning: idempotent_no_progress_warning; count=\d+; "
+            r"[A-Za-z0-9_]+ returned the same result \d+ times\. Use the result already "
+            r"provided or change the query instead of repeating it unchanged\.\]"
+        ),
+    ),
+    (
+        "hardline_shutdown_reboot_block",
+        re.compile(
+            r"BLOCKED \(hardline\): system shutdown/reboot\. This command is on the "
+            r"unconditional blocklist and cannot be executed via the agent(?: .*)?"
+        ),
+    ),
+    (
+        "terminal_foreground_timeout_cap",
+        re.compile(
+            r"Foreground timeout \d+s exceeds the maximum of 600s\. Use background=true "
+            r"with notify_on_complete=true for long-running commands\."
+        ),
+    ),
+    (
+        "model_switch_note",
+        re.compile(
+            r"\[Note: model was just switched from [^\]]+ to [^\]]+ via [^\]]+\. "
+            r"Adjust your self-identification accordingly\.\]"
+        ),
+    ),
+)
+
+
+def platform_primary_evidence_denylist_id(quote: Any) -> str | None:
+    """Return the platform denylist id for a primary evidence quote, if any.
+
+    This is deliberately exact/full-match only. Do not broaden it to substring matching:
+    platform notices may appear near real Leon/agent text, and only the primary quote itself
+    should be rejected when it is pure platform telemetry.
+    """
+    if not isinstance(quote, str):
+        return None
+    text = quote.strip()
+    for denylist_id, exact in PLATFORM_PRIMARY_EVIDENCE_EXACT_DENYLIST.items():
+        if text == exact:
+            return denylist_id
+    for denylist_id, pattern in PLATFORM_PRIMARY_EVIDENCE_REGEX_DENYLIST:
+        if pattern.fullmatch(text):
+            return denylist_id
+    return None
+
+
+def _record_primary_evidence_quote(record: Mapping[str, Any]) -> str:
+    evidence = record.get("evidence")
+    if not isinstance(evidence, list) or not evidence or not isinstance(evidence[0], Mapping):
+        return ""
+    return str(evidence[0].get("quote") or "")
+
 FAMILY_ALIASES = {
     "authorization": "authorization_limit",
     "correction": "correction_preference",
@@ -576,6 +667,14 @@ def validate_cie_payload(
                 evidence_rebindings.append(rebind)
         if not quote_ok:
             continue
+        denylist_id = platform_primary_evidence_denylist_id(
+            _record_primary_evidence_quote({"evidence": resolved_evidence})
+        )
+        if denylist_id:
+            rejected_record = dict(record)
+            rejected_record["platform_primary_evidence_denylist_id"] = denylist_id
+            rejected.append(_reject("platform_primary_evidence_denied", rejected_record))
+            continue
         if code == "model_routing":
             route_text = " ".join(
                 [str(record.get("statement") or "")]
@@ -638,6 +737,18 @@ class CIEDedupRekeySummary:
     total_occurrences_after: int
     merged_groups: int
     rows_collapsed: int
+
+
+@dataclass(frozen=True)
+class CIEPlatformPrimaryEvidencePurgeSummary:
+    rows_before: int
+    rows_after: int
+    rows_removed: int
+    total_occurrences_before: int
+    total_occurrences_after: int
+    occurrences_removed: int
+    removed_by_denylist: dict[str, dict[str, int]]
+    removed_record_ids: tuple[str, ...]
 
 
 def normalize_dedup_text(value: Any) -> str:
@@ -712,6 +823,67 @@ def _record_from_row_for_dedup(row: sqlite3.Row) -> dict[str, Any]:
 def _occurrence_count(row: sqlite3.Row) -> int:
     value = row["occurrence_count"]
     return int(value) if value is not None else 1
+
+
+def _record_from_row_for_platform_filter(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        evidence = json.loads(row["evidence_json"] or "[]")
+    except json.JSONDecodeError:
+        evidence = []
+    return {"evidence": evidence}
+
+
+def purge_cie_platform_primary_evidence_records(
+    conn: sqlite3.Connection,
+) -> CIEPlatformPrimaryEvidencePurgeSummary:
+    rows = conn.execute(
+        """
+        select record_id, evidence_json, coalesce(occurrence_count, 1) as occurrence_count
+        from cie_records
+        order by record_id
+        """
+    ).fetchall()
+    rows_before = len(rows)
+    total_occurrences_before = sum(_occurrence_count(row) for row in rows)
+    removed_by_denylist: dict[str, dict[str, int]] = {}
+    to_remove: list[tuple[str, str, int]] = []
+    for row in rows:
+        denylist_id = platform_primary_evidence_denylist_id(
+            _record_primary_evidence_quote(_record_from_row_for_platform_filter(row))
+        )
+        if not denylist_id:
+            continue
+        occurrences = _occurrence_count(row)
+        to_remove.append((str(row["record_id"]), denylist_id, occurrences))
+        bucket = removed_by_denylist.setdefault(denylist_id, {"rows": 0, "occurrences": 0})
+        bucket["rows"] += 1
+        bucket["occurrences"] += occurrences
+
+    for record_id, _denylist_id, _occurrences in to_remove:
+        conn.execute("delete from cie_records where record_id=?", (record_id,))
+
+    rows_after = conn.execute("select count(*) from cie_records").fetchone()[0]
+    total_occurrences_after = conn.execute(
+        "select coalesce(sum(occurrence_count), 0) from cie_records"
+    ).fetchone()[0]
+    occurrences_removed = sum(item[2] for item in to_remove)
+    if int(total_occurrences_after or 0) != total_occurrences_before - occurrences_removed:
+        raise RuntimeError(
+            "cie_records platform purge changed non-denylisted occurrence total: "
+            f"before={total_occurrences_before} removed={occurrences_removed} "
+            f"after={total_occurrences_after}"
+        )
+    conn.commit()
+    return CIEPlatformPrimaryEvidencePurgeSummary(
+        rows_before=rows_before,
+        rows_after=int(rows_after or 0),
+        rows_removed=len(to_remove),
+        total_occurrences_before=total_occurrences_before,
+        total_occurrences_after=int(total_occurrences_after or 0),
+        occurrences_removed=occurrences_removed,
+        removed_by_denylist=removed_by_denylist,
+        removed_record_ids=tuple(record_id for record_id, _denylist_id, _occurrences in to_remove),
+    )
 
 
 def _nonempty_min(values: Iterable[Any]) -> str | None:

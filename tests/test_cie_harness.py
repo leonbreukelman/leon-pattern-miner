@@ -1,8 +1,11 @@
+import json
+
 from leon_pattern_miner.cie import (
     build_session_windows,
     errored_cie_window_runs,
     families_for_window,
     init_cie_tables,
+    purge_cie_platform_primary_evidence_records,
     render_cie_prompt,
     render_cie_prompt_bundle,
     run_cie_harness,
@@ -237,6 +240,185 @@ def test_validate_rejects_source_reliability_a_for_tool_only_evidence():
 
     assert len(valid) == 1
     assert rejected == []
+
+
+def test_validate_rejects_platform_primary_evidence_quote():
+    text = (
+        "You've reached the maximum number of tool-calling iterations allowed. Please provide a "
+        "final response summarizing what you've found and accomplished so far, without calling "
+        "any more tools."
+    )
+    source_turns = {"s:0": {"actor": "leon", "text": text}}
+    payload = {
+        "records": [
+            {
+                "codebook_code": "failure_recovery",
+                "unit": "turn",
+                "statement": "The agent hit the tool-calling iteration limit.",
+                "actor": "agent",
+                "source_reliability": "C",
+                "info_credibility": 1,
+                "evidence": [{"turn_id": "s:0", "quote": text}],
+                "assumptions": [],
+                "alternative_interpretations": [],
+                "disconfirming_evidence": [],
+                "falsifiers": [],
+                "confidence": "high",
+                "confidence_basis": "platform notice",
+                "sensitivity": "internal",
+            }
+        ]
+    }
+
+    valid, rejected = validate_cie_payload(payload, source_turns, family="verification_review")
+
+    assert valid == []
+    assert rejected[0]["reason"] == "platform_primary_evidence_denied"
+    assert rejected[0]["record"]["platform_primary_evidence_denylist_id"] == (
+        "tool_iteration_limit_notice"
+    )
+
+
+def test_run_harness_does_not_mint_denylisted_platform_record(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    platform_text = (
+        "You've reached the maximum number of tool-calling iterations allowed. Please provide a "
+        "final response summarizing what you've found and accomplished so far, without calling "
+        "any more tools."
+    )
+    _seed_session(conn, turns=[("leon", platform_text, "")])
+
+    def fake_chat(prompt, **kwargs):
+        return {
+            "json": {
+                "records": [
+                    {
+                        "codebook_code": "failure_recovery",
+                        "unit": "turn",
+                        "statement": "The platform forced the agent to stop.",
+                        "actor": "agent",
+                        "source_reliability": "C",
+                        "info_credibility": 1,
+                        "evidence": [{"turn_id": "s:0", "quote": platform_text}],
+                        "assumptions": [],
+                        "alternative_interpretations": [],
+                        "disconfirming_evidence": [],
+                        "falsifiers": [],
+                        "confidence": "high",
+                        "confidence_basis": "platform notice",
+                        "sensitivity": "internal",
+                    }
+                ]
+            }
+        }
+
+    summary = run_cie_harness(
+        conn,
+        extractor_version="fixture-platform",
+        chat_func=fake_chat,
+        combined_pass=True,
+    )
+
+    assert summary.records_created == 0
+    assert summary.records_rejected == 1
+    assert conn.execute("select count(*) from cie_records").fetchone()[0] == 0
+    assert conn.execute("select rejection_cause from cie_rejections").fetchone()[0] == (
+        "platform_primary_evidence_denied"
+    )
+
+
+def test_platform_filter_keeps_real_message_that_only_mentions_platform_notice():
+    platform_text = (
+        "You've reached the maximum number of tool-calling iterations allowed. Please provide a "
+        "final response summarizing what you've found and accomplished so far, without calling "
+        "any more tools."
+    )
+    quote = (
+        "When the platform says \""
+        + platform_text
+        + "\", treat that as telemetry, not a behavioral finding."
+    )
+    source_turns = {"s:0": {"actor": "leon", "text": quote}}
+    payload = {
+        "records": [
+            {
+                "codebook_code": "correction_preference",
+                "unit": "turn",
+                "statement": "Leon says platform limit notices are telemetry, not behavioral findings.",
+                "actor": "leon",
+                "source_reliability": "A",
+                "info_credibility": 1,
+                "evidence": [{"turn_id": "s:0", "quote": quote}],
+                "assumptions": [],
+                "alternative_interpretations": [],
+                "disconfirming_evidence": [],
+                "falsifiers": [],
+                "confidence": "high",
+                "confidence_basis": "direct instruction",
+                "sensitivity": "internal",
+            }
+        ]
+    }
+
+    valid, rejected = validate_cie_payload(payload, source_turns, family="correction_preference")
+
+    assert len(valid) == 1
+    assert rejected == []
+
+
+def test_purge_platform_primary_evidence_records_reconciles_occurrences(tmp_path):
+    conn = connect(tmp_path / "miner.db")
+    init_db(conn)
+    init_cie_tables(conn)
+    platform_text = (
+        "You've reached the maximum number of tool-calling iterations allowed. Please provide a "
+        "final response summarizing what you've found and accomplished so far, without calling "
+        "any more tools."
+    )
+    behavioral_text = "Do not edit files."
+    _seed_session(conn, turns=[("leon", platform_text, ""), ("leon", behavioral_text, "")])
+    rows = [
+        ("platform-1", "failure_recovery", "Platform notice", platform_text, 11),
+        ("platform-2", "authorization_limit", "Platform notice duplicate", platform_text, 8),
+        ("behavioral-1", "authorization_limit", "Leon forbids edits", behavioral_text, 5),
+    ]
+    for record_id, code, statement, quote, occurrence_count in rows:
+        turn_id = "s:0" if quote == platform_text else "s:1"
+        conn.execute(
+            """
+            insert into cie_records(record_id, session_id, window_id, extractor_version, family,
+              codebook_code, unit, statement, actor, source_reliability, info_credibility,
+              confidence, sensitivity, evidence_json, facets_json, assumptions_json,
+              alternatives_json, disconfirming_json, falsifiers_json, quote_verified, dedup_key,
+              occurrence_count, first_seen, last_seen)
+            values (?, 's', 'w', 'v', 'verification_review', ?, 'turn', ?, 'leon', 'A', 1,
+              'high', 'internal', ?, '{}', '[]', '[]', '[]', '[]', 1,
+              ?, ?, datetime('now'), datetime('now'))
+            """,
+            (
+                record_id,
+                code,
+                statement,
+                json.dumps([{"turn_id": turn_id, "quote": quote}]),
+                f"manual-{record_id}",
+                occurrence_count,
+            ),
+        )
+    conn.commit()
+
+    summary = purge_cie_platform_primary_evidence_records(conn)
+
+    assert summary.rows_before == 3
+    assert summary.rows_removed == 2
+    assert summary.rows_after == 1
+    assert summary.total_occurrences_before == 24
+    assert summary.occurrences_removed == 19
+    assert summary.total_occurrences_after == 5
+    assert summary.removed_by_denylist == {"tool_iteration_limit_notice": {"rows": 2, "occurrences": 19}}
+    remaining = conn.execute("select record_id, occurrence_count from cie_records").fetchone()
+    assert remaining["record_id"] == "behavioral-1"
+    assert remaining["occurrence_count"] == 5
 
 
 def test_validate_caps_records_per_payload_to_prevent_code_spam():
